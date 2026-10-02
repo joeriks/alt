@@ -190,6 +190,7 @@ class _RecordScreenState extends State<RecordScreen> {
         SnackBar(
           content: Text('Borttagen: ${r.str(c.titleField)}'),
           duration: const Duration(seconds: 5),
+          persist: false,
           action: SnackBarAction(label: 'Ångra', onPressed: () => restoreRecord(r)),
         ),
       );

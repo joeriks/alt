@@ -113,6 +113,7 @@ void showUndo(BuildContext context, String text, VoidCallback undo) {
       SnackBar(
         content: Text(text),
         duration: const Duration(seconds: 5),
+        persist: false,
         action: SnackBarAction(label: 'Ångra', onPressed: undo),
       ),
     );

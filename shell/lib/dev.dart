@@ -43,12 +43,14 @@ Future<Map<String, String>> allDrafts() async {
   };
 }
 
-/// Hämtade filer som relativa sökvägar, sorterade.
+/// Hämtade filer och nya utkast som relativa sökvägar, sorterade.
 Future<List<String>> workspaceFiles() async {
   final root = await workspaceDir();
-  if (!root.existsSync()) return [];
-  return [for (final f in root.listSync(recursive: true).whereType<File>()) f.path.substring(root.path.length + 1)]
-    ..sort();
+  return {
+    if (root.existsSync())
+      for (final f in root.listSync(recursive: true).whereType<File>()) f.path.substring(root.path.length + 1),
+    ...(await allDrafts()).keys,
+  }.toList()..sort();
 }
 
 const _code = TextStyle(fontFamily: 'monospace', fontSize: 14, height: 1.45, color: fg);

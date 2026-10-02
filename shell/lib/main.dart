@@ -1,6 +1,8 @@
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter/material.dart';
 
+import 'ai.dart';
+import 'ai_screen.dart';
 import 'dev.dart';
 import 'engine.dart';
 import 'host.dart';
@@ -125,21 +127,32 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
   }
 
-  Future<void> _askToken() async {
+  Future<void> _askToken() => _askSecret(
+    'GitHub-nyckel',
+    'Läsrätt till ${defaultRepo.split('/').last}. Sparas krypterad på telefonen.',
+    setGithubToken,
+    'nyckeln sparad, kör System / Hämta recept',
+  );
+
+  Future<void> _askClaudeKey() => _askSecret(
+    'Claude-nyckel',
+    'En API-nyckel från console.anthropic.com. Sparas krypterad på telefonen.',
+    setClaudeKey,
+    'nyckeln sparad, prova Utveckla / Fråga AI',
+  );
+
+  Future<void> _askSecret(String title, String help, Future<void> Function(String) save, String done) async {
     final ctl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1B18),
-        title: const Text('GitHub-nyckel', style: TextStyle(fontSize: 20)),
+        title: Text(title, style: const TextStyle(fontSize: 20)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Läsrätt till ${defaultRepo.split('/').last}. Sparas krypterad på telefonen.',
-              style: const TextStyle(color: muted, fontSize: 15),
-            ),
+            Text(help, style: const TextStyle(color: muted, fontSize: 15)),
             TextField(controller: ctl, obscureText: true, autofocus: true, cursorColor: accent),
           ],
         ),
@@ -150,8 +163,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       ),
     );
     if (ok == true && ctl.text.trim().isNotEmpty) {
-      await setGithubToken(ctl.text);
-      _say('nyckeln sparad, kör System / Hämta recept');
+      await save(ctl.text);
+      _say(done);
     }
     ctl.dispose();
   }
@@ -194,7 +207,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       }
     }),
     _Cmd('System / GitHub-nyckel', _askToken),
+    _Cmd('System / Claude-nyckel', _askClaudeKey),
     _Cmd('Utveckla / Filer', () => _push(const DevFilesScreen())),
+    _Cmd('Utveckla / Fråga AI', () => _push(const AiScreen())),
     _Cmd('System / Schema / Starta', () async {
       await requestNotificationPermission();
       final d = await scheduleAll();
@@ -300,7 +315,34 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                       ),
                     ),
                   ),
-                if (entries.isEmpty) const Text('inget som matchar', style: TextStyle(color: muted)),
+                // Ingen träff: erbjud att låta AI:n bygga det man skrev.
+                if (entries.isEmpty)
+                  InkWell(
+                    onTap: () {
+                      final ask = _q.text;
+                      _q.clear();
+                      FocusScope.of(context).unfocus();
+                      _push(AiScreen(ask: ask)).then((_) => _reload());
+                    },
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 48),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text.rich(
+                          TextSpan(
+                            text: 'Fråga AI: ',
+                            style: const TextStyle(color: accent),
+                            children: [
+                              TextSpan(
+                                text: _q.text,
+                                style: const TextStyle(color: fg),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 12),
                 Container(
                   decoration: const BoxDecoration(

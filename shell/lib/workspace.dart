@@ -65,13 +65,11 @@ class Field {
 }
 
 /// Språkfilen som matchar telefonens språk, till exempel `lang/sv.yaml`.
-Map<String, dynamic> loadLang(Directory root, {String Function(File)? read}) {
+Map<String, dynamic> loadLang(Map<String, String> files) {
   final code = Platform.localeName.split(RegExp('[_-]')).first.toLowerCase();
-  final f = File('${root.path}/lang/$code.yaml');
-  if (!f.existsSync()) return const {};
-  return Map<String, dynamic>.from(
-    jsonDecode(jsonEncode(loadYaml((read ?? (f) => f.readAsStringSync())(f)) ?? {})) as Map,
-  );
+  final text = files['lang/$code.yaml'];
+  if (text == null) return const {};
+  return Map<String, dynamic>.from(jsonDecode(jsonEncode(loadYaml(text) ?? {})) as Map);
 }
 
 class Collection {
@@ -170,62 +168,68 @@ class Workspace {
 
   Collection? collection(String name) => collections.where((c) => c.name == name).firstOrNull;
 
-  /// [overlay] ersätter innehållet i enskilda filer (relativ sökväg → text).
+  /// [overlay] ersätter eller lägger till filer (relativ sökväg → text).
   /// Används av Utveckla för att prova utkast utan att röra den hämtade kopian.
   static Future<Workspace> load({Map<String, String> overlay = const {}}) async {
     final root = await workspaceDir();
-    String read(File f) => overlay[f.path.substring(root.path.length + 1)] ?? f.readAsStringSync();
+    final files = <String, String>{};
+    if (root.existsSync()) {
+      for (final f in root.listSync(recursive: true).whereType<File>()) {
+        files[f.path.substring(root.path.length + 1)] = f.readAsStringSync();
+      }
+    }
+    files.addAll(overlay);
+    return fromFiles(files);
+  }
+
+  static Workspace fromFiles(Map<String, String> files) {
+    final paths = files.keys.toList()..sort();
     final collections = <Collection>[];
     final recipes = <Recipe>[];
     final problems = <String>[];
     var lang = const <String, dynamic>{};
     try {
-      lang = loadLang(root, read: read);
+      lang = loadLang(files);
     } catch (e) {
       problems.add('lang: $e');
     }
     final types = <String, Map<String, dynamic>>{};
-    final typeDir = Directory('${root.path}/types');
-    if (typeDir.existsSync()) {
-      for (final f in typeDir.listSync().whereType<File>().where((f) => f.path.endsWith('.type.yaml'))) {
-        final file = f.uri.pathSegments.last;
-        try {
-          types[file.substring(0, file.length - '.type.yaml'.length)] = Map<String, dynamic>.from(
-            jsonDecode(jsonEncode(loadYaml(read(f)))) as Map,
-          );
-        } catch (e) {
-          problems.add('types/$file: $e');
-        }
+    for (final p in paths) {
+      final m = RegExp(r'^types/([^/]+)\.type\.yaml$').firstMatch(p);
+      if (m == null) continue;
+      try {
+        types[m[1]!] = Map<String, dynamic>.from(jsonDecode(jsonEncode(loadYaml(files[p]!))) as Map);
+      } catch (e) {
+        problems.add('$p: $e');
       }
     }
-    final apps = Directory('${root.path}/apps');
-    if (apps.existsSync()) {
-      final appDirs = apps.listSync().whereType<Directory>().toList()..sort((a, b) => a.path.compareTo(b.path));
-      for (final dir in appDirs) {
-        final app = dir.uri.pathSegments.where((s) => s.isNotEmpty).last;
-        var appLabel = app;
-        final appFile = File('${dir.path}/app.yaml');
-        if (appFile.existsSync()) {
+    final appLabels = <String, String>{};
+    for (final p in paths) {
+      final m = RegExp(r'^apps/([^/]+)/').firstMatch(p);
+      if (m == null) continue;
+      final app = m[1]!;
+      if (!appLabels.containsKey(app)) {
+        appLabels[app] = app;
+        final appFile = files['apps/$app/app.yaml'];
+        if (appFile != null) {
           try {
-            appLabel = (loadYaml(read(appFile)) as Map?)?['label']?.toString() ?? app;
+            appLabels[app] = (loadYaml(appFile) as Map?)?['label']?.toString() ?? app;
           } catch (e) {
             problems.add('$app/app.yaml: $e');
           }
         }
-        final files = dir.listSync().whereType<File>().toList()..sort((a, b) => a.path.compareTo(b.path));
-        for (final f in files) {
-          final file = f.uri.pathSegments.last;
-          try {
-            if (file.endsWith('.collection.yaml')) {
-              final name = file.substring(0, file.length - '.collection.yaml'.length);
-              collections.add(Collection.parse(name, app, appLabel, read(f), types: types, lang: lang));
-            } else if (file.endsWith('.recipe')) {
-              recipes.add(Recipe.parse(read(f)));
-            }
-          } catch (e) {
-            problems.add('$app/$file: $e');
-          }
+      }
+      final file = p.substring(m[0]!.length);
+      if (file.contains('/')) continue;
+      try {
+        if (file.endsWith('.collection.yaml')) {
+          final name = file.substring(0, file.length - '.collection.yaml'.length);
+          collections.add(Collection.parse(name, app, appLabels[app]!, files[p]!, types: types, lang: lang));
+        } else if (file.endsWith('.recipe')) {
+          recipes.add(Recipe.parse(files[p]!));
         }
+      } catch (e) {
+        problems.add('$app/$file: $e');
       }
     }
     return Workspace(collections, recipes, problems);

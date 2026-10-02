@@ -4,7 +4,10 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:alt/ai.dart';
+import 'package:alt/ai_screen.dart';
 import 'package:alt/main.dart';
+import 'package:alt/ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -148,5 +151,50 @@ void main() {
     await shot(tester, 'kod');
     await tester.tap(find.text('Redigera'));
     await shot(tester, 'editor');
+
+    for (var i = 0; i < 3; i++) {
+      await tester.binding.handlePopRoute();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+    await tester.enterText(find.byType(TextField), 'böcker jag har läst');
+    await shot(tester, 'sok_ingen_traff');
+    await tester.tap(find.textContaining('Fråga AI'));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
+    await shot(tester, 'ai_fraga');
+
+    final sv = File('${root.path}/workspace/lang/sv.yaml').readAsStringSync();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('shot'),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: altTheme(),
+          home: AiScreen(
+            proposal: AiProposal(
+              'La till samlingen Books i Memory bank med titel, författare, betyg och datum, '
+              'och svenska etiketter.',
+              [
+                AiFile(
+                  'apps/memory_bank/books.collection.yaml',
+                  'label: Books\ntitle: title\nfields:\n  title: { text, required, label: Title }\n'
+                      '  author: { text, label: Author }\n  rating: { number, label: Rating }\n'
+                      '  finished: { date, label: Finished }\n',
+                ),
+                AiFile(
+                  'lang/sv.yaml',
+                  '$sv  books:\n    label: Böcker\n    fields:\n      title: Titel\n'
+                      '      author: Författare\n      rating: Betyg\n      finished: Utläst\n',
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
+    await shot(tester, 'ai_forslag');
+    await tester.tap(find.text('Spara utkast'));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
+    await shot(tester, 'ai_sparat');
   }, skip: !run);
 }

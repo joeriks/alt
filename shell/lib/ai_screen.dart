@@ -201,6 +201,14 @@ class _AiScreenState extends State<AiScreen> {
     return ListView(
       children: [
         Text(p.summary),
+        if (p.ore != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              'kostade ca ${p.ore! < 1 ? 'under 1' : p.ore!.round()} öre',
+              style: const TextStyle(color: muted, fontSize: 15),
+            ),
+          ),
         if (_saved)
           Padding(
             padding: const EdgeInsets.only(top: 12),

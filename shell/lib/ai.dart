@@ -12,7 +12,12 @@ import 'workspace.dart';
 /// dina utkast. Poster, körlogg och lagrade värden skickas aldrig.
 
 const _secure = FlutterSecureStorage();
-const model = 'claude-opus-5-5';
+
+/// Haiku är billigast: en vanlig ändring kostar några öre.
+const model = 'claude-haiku-4-5';
+
+/// Pris i USD per miljon token (in, ut) och en ungefärlig växelkurs, för att visa kostnaden.
+const _usdPerMTokIn = 1.0, _usdPerMTokOut = 5.0, _sekPerUsd = 10.0;
 
 Future<String?> claudeKey() => _secure.read(key: 'anthropic_key');
 Future<void> setClaudeKey(String key) => _secure.write(key: 'anthropic_key', value: key.trim());
@@ -47,9 +52,20 @@ class AiFile {
 }
 
 class AiProposal {
-  AiProposal(this.summary, this.files);
+  AiProposal(this.summary, this.files, {this.ore});
   final String summary;
   final List<AiFile> files;
+
+  /// Ungefärlig kostnad i öre, om svaret talade om hur många token det blev.
+  final double? ore;
+}
+
+/// Kostnad i öre för ett anrop, från svarets usage.
+double? costOre(Map<String, dynamic>? usage) {
+  if (usage == null) return null;
+  final input = (usage['input_tokens'] as num? ?? 0) + (usage['cache_creation_input_tokens'] as num? ?? 0);
+  final output = usage['output_tokens'] as num? ?? 0;
+  return (input * _usdPerMTokIn + output * _usdPerMTokOut) / 1e6 * _sekPerUsd * 100;
 }
 
 class AiException implements Exception {
@@ -88,10 +104,8 @@ Map<String, dynamic> buildRequest(String ask, Map<String, String> files) {
   }
   return {
     'model': model,
-    'max_tokens': 16000,
-    'fallbacks': 'default',
+    'max_tokens': 8000,
     'output_config': {
-      'effort': 'high',
       'format': {'type': 'json_schema', 'schema': _schema},
     },
     'system': aiRules,
@@ -127,7 +141,7 @@ AiProposal parseResponse(Map<String, dynamic> res) {
     }
     files.add(AiFile(path, f['content'] as String));
   }
-  return AiProposal((data['summary'] ?? '').toString(), files);
+  return AiProposal((data['summary'] ?? '').toString(), files, ore: costOre(res['usage'] as Map<String, dynamic>?));
 }
 
 /// Skickar ändringen till Claude och returnerar förslaget.
@@ -140,7 +154,6 @@ Future<AiProposal> askClaude(String ask, Map<String, String> files) async {
     req.headers.contentType = ContentType.json;
     req.headers.set('x-api-key', key);
     req.headers.set('anthropic-version', '2023-06-01');
-    req.headers.set('anthropic-beta', 'server-side-fallback-2026-07-01');
     req.add(utf8.encode(jsonEncode(buildRequest(ask, files))));
     final res = await req.close().timeout(const Duration(minutes: 5));
     final body = await res.transform(utf8.decoder).join();

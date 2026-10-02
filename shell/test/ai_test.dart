@@ -14,7 +14,7 @@ Map<String, dynamic> reply(Object data, {String stop = 'end_turn'}) => {
 void main() {
   test('förfrågan skickar bara filerna och ändringen', () {
     final r = buildRequest('lägg till böcker', {'apps/a/app.yaml': 'label: A'});
-    expect(r['model'], 'claude-opus-5-5');
+    expect(r['model'], 'claude-haiku-4-5');
     expect(r['output_config']['format']['type'], 'json_schema');
     final msg = r['messages'][0]['content'] as String;
     expect(msg, contains('<file path="apps/a/app.yaml">'));
@@ -55,6 +55,12 @@ void main() {
   test('avböjt och avkortat svar ger tydliga fel', () {
     expect(() => parseResponse({'stop_reason': 'refusal', 'content': []}), throwsA(isA<AiException>()));
     expect(() => parseResponse(reply({}, stop: 'max_tokens')), throwsA(isA<AiException>()));
+  });
+
+  test('kostnaden räknas i öre', () {
+    // 2000 in och 600 ut: (2000 * 1 + 600 * 5) / 1e6 USD = 0,005 USD = 5 öre
+    expect(costOre({'input_tokens': 2000, 'output_tokens': 600}), closeTo(5, 0.001));
+    expect(costOre(null), isNull);
   });
 
   test('raddiff', () {

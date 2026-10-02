@@ -220,6 +220,7 @@ void main() {
           debugShowCheckedModeBanner: false,
           theme: altTheme(),
           home: AiScreen(
+            ask: 'vad har jag den närmaste månaden?',
             proposal: AiProposal(
               'De här posterna i Privat kalender ligger framför dig de närmaste 30 dagarna.',
               [
@@ -247,7 +248,8 @@ void main() {
           theme: altTheme(),
           home: const EditScreen(
             path: 'apps/memory_bank/upcoming.query.yaml',
-            text: 'label: Upcoming\nfrom: private_calendar\nwhere:\n  date: { from: today, to: today+14d }\nsort: date\n',
+            text:
+                'label: Upcoming\nfrom: private_calendar\nwhere:\n  date: { from: today, to: today+14d }\nsort: date\n',
           ),
         ),
       ),

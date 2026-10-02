@@ -46,6 +46,8 @@ class _AiScreenState extends State<AiScreen> {
   AiProposal? _previous;
   bool _showFiles = false;
   bool _manySources = false;
+  String? _queryLabel;
+  late String _asked = widget.ask;
 
   @override
   void initState() {
@@ -76,6 +78,7 @@ class _AiScreenState extends State<AiScreen> {
 
   Future<void> _send() async {
     final ask = _ctl.text.trim();
+    _asked = ask;
     if (ask.isEmpty) {
       setState(() => _error = 'Skriv en fråga eller en ändring först.');
       return;
@@ -127,6 +130,7 @@ class _AiScreenState extends State<AiScreen> {
       setState(() {
         _results = results;
         _manySources = q.sources(ws.collections).length > 1;
+        _queryLabel = q.label;
       });
     }
   }
@@ -157,6 +161,7 @@ class _AiScreenState extends State<AiScreen> {
     _results = null;
     _saved = false;
     _published = false;
+    _queryLabel = null;
     _error = null;
     _ctl.clear();
   });
@@ -184,7 +189,7 @@ class _AiScreenState extends State<AiScreen> {
     final p = _proposal;
     return AltPage(
       back: 'Meny',
-      title: 'Fråga AI',
+      title: p != null && p.run.isNotEmpty && _results != null ? (_queryLabel ?? 'Svar') : 'Fråga AI',
       bottom: _busy
           ? null
           : p == null
@@ -242,7 +247,11 @@ class _AiScreenState extends State<AiScreen> {
                 ),
               ],
             ),
-      child: p == null ? _askView() : _proposalView(p),
+      child: p == null
+          ? _askView()
+          : p.run.isNotEmpty && _results != null
+          ? _answerView(p)
+          : _proposalView(p),
     );
   }
 
@@ -294,9 +303,72 @@ class _AiScreenState extends State<AiScreen> {
     );
   }
 
+  /// Svar på en fråga om posterna: listan först, AI:ns förklaring och frågan längst ner.
+  Widget _answerView(AiProposal p) {
+    const small = TextStyle(color: muted, fontSize: 14);
+    final n = _results!.length;
+    return ListView(
+      children: [
+        if (_asked.isNotEmpty) Text('> $_asked', style: small),
+        if (p.summary.trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(p.summary, style: small),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            [
+              if (p.ore != null) 'kostade ca ${p.ore! < 1 ? 'under 1' : p.ore!.round()} öre',
+              _published
+                  ? 'sparad i menyn'
+                  : _saved
+                  ? 'sparad som utkast'
+                  : 'räknad på telefonen, inte sparad',
+            ].join(' · '),
+            style: small,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 20, bottom: 4),
+          child: Text(
+            n == 1 ? '1 post' : '$n poster',
+            style: const TextStyle(color: accent, fontWeight: FontWeight.w700),
+          ),
+        ),
+        QueryResults(items: _results!, onChanged: () => _runQuery(p), showCollection: _manySources),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(_error!, style: const TextStyle(color: red)),
+          ),
+        const SizedBox(height: 16),
+        InkWell(
+          onTap: () => setState(() => _showFiles = !_showFiles),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _showFiles ? 'Dölj frågan' : 'Visa och redigera frågan ›',
+                style: const TextStyle(color: muted, fontSize: 14),
+              ),
+            ),
+          ),
+        ),
+        if (_showFiles) ..._fileRows(p),
+      ],
+    );
+  }
+
   Widget _proposalView(AiProposal p) {
     return ListView(
       children: [
+        if (_asked.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text('> $_asked', style: const TextStyle(color: muted, fontSize: 14)),
+          ),
         Text(
           p.summary.trim().isNotEmpty
               ? p.summary
@@ -358,48 +430,52 @@ class _AiScreenState extends State<AiScreen> {
             padding: const EdgeInsets.only(top: 16),
             child: Text(_error!, style: const TextStyle(color: red)),
           ),
-        for (final f in (p.run.isEmpty || _showFiles ? p.files : const <AiFile>[])) ...[
-          const SizedBox(height: 20),
-          InkWell(
-            onTap: _saved
-                ? () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => FileScreen(path: f.path)))
-                : f.path == p.run
-                ? () => _editQuery(p, f)
-                : null,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 40),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text.rich(
-                  TextSpan(
-                    text: f.path,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                    children: [
-                      TextSpan(
-                        text: _base.containsKey(f.path) ? '  ändrad' : '  ny',
-                        style: const TextStyle(color: muted, fontSize: 15, fontWeight: FontWeight.w400),
-                      ),
-                      if (!_saved && f.path == p.run)
-                        const TextSpan(
-                          text: '  redigera',
-                          style: TextStyle(color: accent, fontSize: 15, fontWeight: FontWeight.w400),
-                        ),
-                      if (_saved)
-                        const TextSpan(
-                          text: '  ›',
-                          style: TextStyle(color: accent),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          _Diff(lineDiff(_base[f.path] ?? '', f.content)),
-        ],
+        ..._fileRows(p),
       ],
     );
   }
+
+  List<Widget> _fileRows(AiProposal p) => [
+    for (final f in p.files) ...[
+      const SizedBox(height: 20),
+      InkWell(
+        onTap: _saved
+            ? () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => FileScreen(path: f.path)))
+            : f.path == p.run
+            ? () => _editQuery(p, f)
+            : null,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 40),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text.rich(
+              TextSpan(
+                text: f.path,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+                children: [
+                  TextSpan(
+                    text: _base.containsKey(f.path) ? '  ändrad' : '  ny',
+                    style: const TextStyle(color: muted, fontSize: 15, fontWeight: FontWeight.w400),
+                  ),
+                  if (!_saved && f.path == p.run)
+                    const TextSpan(
+                      text: '  redigera',
+                      style: TextStyle(color: accent, fontSize: 15, fontWeight: FontWeight.w400),
+                    ),
+                  if (_saved)
+                    const TextSpan(
+                      text: '  ›',
+                      style: TextStyle(color: accent),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      _Diff(lineDiff(_base[f.path] ?? '', f.content)),
+    ],
+  ];
 }
 
 /// Visar en raddiff och döljer långa oförändrade partier.

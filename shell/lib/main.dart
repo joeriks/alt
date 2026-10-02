@@ -1,6 +1,7 @@
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter/material.dart';
 
+import 'dev.dart';
 import 'engine.dart';
 import 'host.dart';
 import 'screens.dart';
@@ -185,6 +186,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       }
     }),
     _Cmd('Inställningar / GitHub-nyckel', _askToken),
+    _Cmd('Utveckla / Filer', () => _push(const DevFilesScreen())),
     _Cmd('Schema / Starta', () async {
       await requestNotificationPermission();
       final d = await scheduleAll();

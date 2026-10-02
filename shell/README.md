@@ -26,6 +26,16 @@ Namn och etiketter skrivs på engelska; `lang/<språk>.yaml` i receptrepot ersä
 när telefonen har det språket. Poster sparas som en fil per
 post i appens mapp; synk mot datarepot kommer i nästa steg.
 
+## Utveckla
+
+`Utveckla / Filer` listar alla hämtade filer. En fil kan visas med radnummer, redigeras och
+sparas som utkast på telefonen, och provas med `Prova`:
+- ett recept körs mot en egen utkastlagring och visar sin utdata i stället för att skicka notiser
+- en samling öppnar sitt formulär som förhandsvisning
+- typer, språkfiler och app.yaml laddas om tillsammans med alla samlingar och visar eventuella fel
+
+Utkast påverkar inget annat förrän de sparas till GitHub, vilket är nästa steg.
+
 ## Delar
 
 - `recipes/hej.recipe` är testreceptet: YAML-huvud och JavaScript med `function run(ctx)`.
@@ -34,6 +44,7 @@ post i appens mapp; synk mot datarepot kommer i nästa steg.
 - `lib/workspace.dart` hämtar och tolkar appar, samlingar och recept.
 - `lib/records.dart` sparar poster, historik och papperskorg.
 - `lib/screens.dart` är lista, post, formulär och datumvy.
+- `lib/dev.dart` är Utveckla: fillista, kodvy, redigering och Prova.
 - `lib/main.dart` är startsidan med kommandoprompten längst ner.
 
 Signeringsnyckeln `android/app/spike.keystore` är publik med avsikt så att varje bygge kan

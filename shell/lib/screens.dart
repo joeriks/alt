@@ -245,8 +245,18 @@ class _RecordScreenState extends State<RecordScreen> {
 }
 
 class FormScreen extends StatefulWidget {
-  const FormScreen({super.key, required this.collection, required this.back, this.rec, this.initial});
+  const FormScreen({
+    super.key,
+    required this.collection,
+    required this.back,
+    this.rec,
+    this.initial,
+    this.preview = false,
+  });
   final Collection collection;
+
+  /// Förhandsvisning från Utveckla: Spara kontrollerar fälten men sparar inget.
+  final bool preview;
   final String back;
   final Rec? rec;
   final Map<String, dynamic>? initial;
@@ -319,6 +329,13 @@ class _FormScreenState extends State<FormScreen> {
       setState(() => _error = 'Fyll i ${missing.map((f) => f.label).join(' och ')} först.');
       return;
     }
+    if (widget.preview) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Förhandsvisning: allt ifyllt rätt, inget sparades')));
+      Navigator.of(context).pop();
+      return;
+    }
     final saved = await saveRecord(c, _v, id: widget.rec?.id);
     if (mounted) Navigator.of(context).pop(saved);
   }
@@ -348,7 +365,7 @@ class _FormScreenState extends State<FormScreen> {
   Widget build(BuildContext context) {
     return AltPage(
       back: widget.back,
-      title: widget.rec == null ? 'Ny' : 'Redigera',
+      title: widget.preview ? 'Förhandsvisning' : (widget.rec == null ? 'Ny' : 'Redigera'),
       bottom: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

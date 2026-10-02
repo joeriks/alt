@@ -65,11 +65,13 @@ class Field {
 }
 
 /// Språkfilen som matchar telefonens språk, till exempel `lang/sv.yaml`.
-Map<String, dynamic> loadLang(Directory root) {
+Map<String, dynamic> loadLang(Directory root, {String Function(File)? read}) {
   final code = Platform.localeName.split(RegExp('[_-]')).first.toLowerCase();
   final f = File('${root.path}/lang/$code.yaml');
   if (!f.existsSync()) return const {};
-  return Map<String, dynamic>.from(jsonDecode(jsonEncode(loadYaml(f.readAsStringSync()) ?? {})) as Map);
+  return Map<String, dynamic>.from(
+    jsonDecode(jsonEncode(loadYaml((read ?? (f) => f.readAsStringSync())(f)) ?? {})) as Map,
+  );
 }
 
 class Collection {
@@ -168,14 +170,17 @@ class Workspace {
 
   Collection? collection(String name) => collections.where((c) => c.name == name).firstOrNull;
 
-  static Future<Workspace> load() async {
+  /// [overlay] ersätter innehållet i enskilda filer (relativ sökväg → text).
+  /// Används av Utveckla för att prova utkast utan att röra den hämtade kopian.
+  static Future<Workspace> load({Map<String, String> overlay = const {}}) async {
     final root = await workspaceDir();
+    String read(File f) => overlay[f.path.substring(root.path.length + 1)] ?? f.readAsStringSync();
     final collections = <Collection>[];
     final recipes = <Recipe>[];
     final problems = <String>[];
     var lang = const <String, dynamic>{};
     try {
-      lang = loadLang(root);
+      lang = loadLang(root, read: read);
     } catch (e) {
       problems.add('lang: $e');
     }
@@ -186,7 +191,7 @@ class Workspace {
         final file = f.uri.pathSegments.last;
         try {
           types[file.substring(0, file.length - '.type.yaml'.length)] = Map<String, dynamic>.from(
-            jsonDecode(jsonEncode(loadYaml(f.readAsStringSync()))) as Map,
+            jsonDecode(jsonEncode(loadYaml(read(f)))) as Map,
           );
         } catch (e) {
           problems.add('types/$file: $e');
@@ -202,7 +207,7 @@ class Workspace {
         final appFile = File('${dir.path}/app.yaml');
         if (appFile.existsSync()) {
           try {
-            appLabel = (loadYaml(appFile.readAsStringSync()) as Map?)?['label']?.toString() ?? app;
+            appLabel = (loadYaml(read(appFile)) as Map?)?['label']?.toString() ?? app;
           } catch (e) {
             problems.add('$app/app.yaml: $e');
           }
@@ -213,9 +218,9 @@ class Workspace {
           try {
             if (file.endsWith('.collection.yaml')) {
               final name = file.substring(0, file.length - '.collection.yaml'.length);
-              collections.add(Collection.parse(name, app, appLabel, f.readAsStringSync(), types: types, lang: lang));
+              collections.add(Collection.parse(name, app, appLabel, read(f), types: types, lang: lang));
             } else if (file.endsWith('.recipe')) {
-              recipes.add(Recipe.parse(f.readAsStringSync()));
+              recipes.add(Recipe.parse(read(f)));
             }
           } catch (e) {
             problems.add('$app/$file: $e');
@@ -227,7 +232,7 @@ class Workspace {
   }
 }
 
-/// Hämtar alla filer under `apps/` och `types/` från receptrepot. Returnerar antal filer.
+/// Hämtar alla filer under `apps/`, `types/` och `lang/` från receptrepot. Returnerar antal filer.
 Future<int> syncWorkspace() async {
   final token = await githubToken();
   if (token == null || token.isEmpty) throw StateError('ingen GitHub-nyckel, lägg in den under Inställningar / GitHub');

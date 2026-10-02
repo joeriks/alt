@@ -275,6 +275,12 @@ class _FormScreenState extends State<FormScreen> {
   @override
   void initState() {
     super.initState();
+    // En ny post får dagens datum i ett obligatoriskt datumfält; det vanligaste är att man skriver in något nära i tiden.
+    if (widget.rec == null) {
+      for (final f in c.fields.where((f) => f.type == 'date' && f.required)) {
+        _v[f.name] ??= isoDate(today());
+      }
+    }
     for (final f in c.fields) {
       if (f.type == 'text' || f.type == 'longtext' || f.type == 'number' || f.type == 'link') {
         _text[f.name] = TextEditingController(text: _v[f.name]?.toString() ?? '');
@@ -326,7 +332,7 @@ class _FormScreenState extends State<FormScreen> {
     }
     final missing = c.fields.where((f) => f.required && (_v[f.name] == null || _v[f.name].toString().isEmpty));
     if (missing.isNotEmpty) {
-      setState(() => _error = 'Fyll i ${missing.map((f) => f.label).join(' och ')} först.');
+      setState(() => _error = 'Fyll i ${missing.map((f) => f.label.toLowerCase()).join(' och ')} först.');
       return;
     }
     if (widget.preview) {
@@ -390,15 +396,24 @@ class _FormScreenState extends State<FormScreen> {
               ),
               _ => Padding(
                 padding: const EdgeInsets.only(bottom: 14),
-                child: TextField(
-                  controller: _text[f.name],
-                  autofocus: f.name == c.titleField && widget.rec == null,
-                  minLines: f.type == 'longtext' ? 3 : 1,
-                  maxLines: f.type == 'longtext' ? 8 : 1,
-                  keyboardType: f.type == 'number' ? TextInputType.number : TextInputType.text,
-                  textCapitalization: TextCapitalization.sentences,
-                  cursorColor: accent,
-                  decoration: InputDecoration(labelText: f.label + (f.required ? '' : '  (valfritt)')),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(f.label, style: const TextStyle(color: muted, fontSize: 15)),
+                    TextField(
+                      controller: _text[f.name],
+                      autofocus: f.name == c.titleField && widget.rec == null,
+                      minLines: f.type == 'longtext' ? 3 : 1,
+                      maxLines: f.type == 'longtext' ? 8 : 1,
+                      keyboardType: f.type == 'number' ? TextInputType.number : TextInputType.text,
+                      textCapitalization: TextCapitalization.sentences,
+                      cursorColor: accent,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 8),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             },

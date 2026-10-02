@@ -131,7 +131,8 @@ fields:
       'Spike / Hej',
       'Ensam',
     ];
-    expect(menuLevel(labels, []), [('Datum', null), ('Minnesbank', null), ('Spike', null), ('Ensam', 4)]);
+    // Datum har bara ett val och visas därför direkt; Spike likaså.
+    expect(menuLevel(labels, []), [('Datum / 14 dagar', 0), ('Minnesbank', null), ('Spike / Hej', 3), ('Ensam', 4)]);
     expect(menuLevel(labels, ['Minnesbank']), [('Privat kalender', 1), ('Jobbkalender', 2)]);
     expect(menuLevel(labels, ['Okänd']), isEmpty);
   });

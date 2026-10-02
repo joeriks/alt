@@ -1,0 +1,21 @@
+---
+name: hej
+label: Hej
+triggers:
+  - menu: Spike/Hej
+  - every: 15m
+outputs: [show]
+---
+// Spikens testrecept: räknar körningar och visar en notis.
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+function run({ signal, store, out, log }) {
+  const antal = (store.get('antal') || 0) + 1;
+  store.set('antal', antal);
+
+  const d = new Date();
+  const tid = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+
+  log('körning ' + antal + ' via ' + signal.trigger);
+  out.show('Hej från receptet', 'Körning ' + antal + ' kl ' + tid + ' (' + signal.trigger + ')');
+}

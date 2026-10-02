@@ -58,14 +58,25 @@ class AltPage extends StatelessWidget {
                     child: Align(
                       alignment: Alignment.centerLeft,
                       widthFactor: 1,
-                      child: Text('‹ $back', style: const TextStyle(color: muted, fontSize: 18)),
+                      child: Text(
+                        '‹ $back',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: muted, fontSize: 18),
+                      ),
                     ),
                   ),
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.only(bottom: 16),
-                child: Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
+                child: Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  // Långa namn, som filnamn, får mindre text i stället för att brytas mitt i ordet.
+                  style: TextStyle(fontSize: title.length > 22 ? 20 : 26, fontWeight: FontWeight.w700),
+                ),
               ),
               Expanded(child: child),
               ?bottom,

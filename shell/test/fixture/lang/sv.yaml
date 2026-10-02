@@ -1,0 +1,21 @@
+# Svenska etiketter. Ersätter de engelska när telefonen är på svenska;
+# det som saknas här visas på engelska.
+apps:
+  memory_bank: Minnesbank
+  spike: Spike
+
+types:
+  dated_entry:
+    fields:
+      date: Datum
+      time: Tid
+      title: Titel
+      note: Anteckning
+
+collections:
+  private_calendar:
+    label: Privat kalender
+  work_calendar:
+    label: Jobbkalender
+    fields:
+      project: Projekt

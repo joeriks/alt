@@ -203,7 +203,7 @@ class _FileScreenState extends State<FileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final lines = _text.split('\n');
+    final lines = _text.endsWith('\n') ? _text.substring(0, _text.length - 1).split('\n') : _text.split('\n');
     final width = '${lines.length}'.length;
     return AltPage(
       back: 'Filer',

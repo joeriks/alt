@@ -36,23 +36,31 @@ class _Cmd {
 /// vid `/`. Returnerar (namn, index) för kommandon och (namn, null) för undermenyer.
 List<(String, int?)> menuLevel(List<String> labels, List<String> path) {
   final out = <(String, int?)>[];
-  final folders = <String>{};
+  final under = <String, List<int>>{};
   for (var i = 0; i < labels.length; i++) {
     final segs = labels[i].split('/').map((s) => s.trim()).toList();
     if (segs.length <= path.length) continue;
-    var under = true;
+    var inside = true;
     for (var k = 0; k < path.length; k++) {
-      if (segs[k] != path[k]) under = false;
+      if (segs[k] != path[k]) inside = false;
     }
-    if (!under) continue;
+    if (!inside) continue;
     final next = segs[path.length];
     if (segs.length == path.length + 1) {
       out.add((next, i));
-    } else if (folders.add(next)) {
-      out.add((next, null));
+    } else {
+      if (!under.containsKey(next)) out.add((next, null));
+      under.putIfAbsent(next, () => []).add(i);
     }
   }
-  return out;
+  // En undermeny med ett enda val visas som det valet direkt, till exempel "Datum / 14 dagar".
+  return [
+    for (final (name, index) in out)
+      if (index == null && under[name]!.length == 1)
+        (labels[under[name]!.first].split('/').map((s) => s.trim()).skip(path.length).join(' / '), under[name]!.first)
+      else
+        (name, index),
+  ];
 }
 
 /// En rad i menyn: antingen ett kommando eller en undermeny (cmd == null).
@@ -76,14 +84,15 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   final List<String> _path = [];
   List<Recipe> _recipes = [];
   Workspace _ws = Workspace([], [], []);
-  List<Map<String, dynamic>> _runs = [];
   String? _status;
+  final _focus = FocusNode();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _q.addListener(() => setState(() {}));
+    _focus.addListener(() => setState(() {}));
     _reload();
   }
 
@@ -91,6 +100,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _q.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -102,12 +112,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   Future<void> _reload() async {
     final ws = await Workspace.load();
     final recipes = await loadRecipes();
-    final runs = await readRuns();
     if (!mounted) return;
     setState(() {
       _ws = ws;
       _recipes = recipes;
-      _runs = runs;
     });
   }
 
@@ -143,7 +151,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     );
     if (ok == true && ctl.text.trim().isNotEmpty) {
       await setGithubToken(ctl.text);
-      _say('nyckeln sparad, kör Synka / Hämta recept');
+      _say('nyckeln sparad, kör System / Hämta recept');
     }
     ctl.dispose();
   }
@@ -175,7 +183,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                   : 'fel: ${res.error}',
             );
           }),
-    _Cmd('Synka / Hämta recept', () async {
+    _Cmd('System / Hämta recept', () async {
       _say('hämtar…');
       try {
         final n = await syncWorkspace();
@@ -185,26 +193,23 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         _say('kunde inte hämta: $e');
       }
     }),
-    _Cmd('Inställningar / GitHub-nyckel', _askToken),
+    _Cmd('System / GitHub-nyckel', _askToken),
     _Cmd('Utveckla / Filer', () => _push(const DevFilesScreen())),
-    _Cmd('Schema / Starta', () async {
+    _Cmd('System / Schema / Starta', () async {
       await requestNotificationPermission();
       final d = await scheduleAll();
       _say(d == null ? 'inget recept har every:' : 'körs var ${d.inMinutes} min, även när appen är stängd');
     }),
-    _Cmd('Schema / Prova om 1 min', () async {
+    _Cmd('System / Schema / Prova om 1 min', () async {
       await requestNotificationPermission();
       await scheduleOnceIn(const Duration(minutes: 1));
       _say('stäng appen och vänta på notisen');
     }),
-    _Cmd('Schema / Stoppa', () async {
+    _Cmd('System / Schema / Stoppa', () async {
       await cancelSchedule();
       _say('schemat stoppat');
     }),
-    _Cmd('Logg / Rensa', () async {
-      await clearRuns();
-      _say('loggen rensad');
-    }),
+    _Cmd('System / Körlogg', () => _push(const _LogScreen())),
   ];
 
   Future<void> _runCmd(_Cmd c) async {
@@ -255,12 +260,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: _reload,
-                    child: _RunList(runs: _runs),
-                  ),
-                ),
+                const Spacer(),
                 if (_status != null)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -311,15 +311,28 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                     children: [
                       const Text('> ', style: TextStyle(color: accent, fontSize: 20)),
                       Expanded(
-                        child: TextField(
-                          controller: _q,
-                          cursorColor: accent,
-                          cursorWidth: 10,
-                          style: const TextStyle(fontSize: 20, color: fg),
-                          decoration: const InputDecoration(border: InputBorder.none, isDense: true),
-                          onSubmitted: (_) {
-                            if (hits.isNotEmpty) _runCmd(hits.first);
-                          },
+                        child: Stack(
+                          alignment: Alignment.centerLeft,
+                          children: [
+                            // Blinkande markör när prompten väntar, som i en terminal.
+                            if (q.isEmpty && !_focus.hasFocus) const IgnorePointer(child: _BlinkingBlock()),
+                            TextField(
+                              controller: _q,
+                              focusNode: _focus,
+                              cursorColor: accent,
+                              cursorWidth: 10,
+                              style: const TextStyle(fontSize: 20, color: fg),
+                              decoration: const InputDecoration(
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                isDense: true,
+                              ),
+                              onSubmitted: (_) {
+                                if (hits.isNotEmpty) _runCmd(hits.first);
+                              },
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -329,6 +342,78 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _BlinkingBlock extends StatefulWidget {
+  const _BlinkingBlock();
+
+  @override
+  State<_BlinkingBlock> createState() => _BlinkingBlockState();
+}
+
+class _BlinkingBlockState extends State<_BlinkingBlock> with SingleTickerProviderStateMixin {
+  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1060))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _c,
+    builder: (_, _) => Opacity(
+      opacity: _c.value < 0.5 ? 1 : 0,
+      child: const Text('█', style: TextStyle(color: accent, fontSize: 20)),
+    ),
+  );
+}
+
+class _LogScreen extends StatefulWidget {
+  const _LogScreen();
+
+  @override
+  State<_LogScreen> createState() => _LogScreenState();
+}
+
+class _LogScreenState extends State<_LogScreen> {
+  List<Map<String, dynamic>> _runs = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final runs = await readRuns();
+    if (mounted) setState(() => _runs = runs);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AltPage(
+      back: 'System',
+      title: 'Körlogg',
+      bottom: _runs.isEmpty
+          ? null
+          : Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () async {
+                  await clearRuns();
+                  await _load();
+                },
+                child: const Text('rensa', style: TextStyle(color: muted)),
+              ),
+            ),
+      child: RefreshIndicator(
+        onRefresh: _load,
+        child: _RunList(runs: _runs),
       ),
     );
   }

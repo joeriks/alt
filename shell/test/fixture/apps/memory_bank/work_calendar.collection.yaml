@@ -1,0 +1,5 @@
+label: Work calendar
+type: dated_entry
+encrypted: true
+fields:
+  project: { text, label: Project }

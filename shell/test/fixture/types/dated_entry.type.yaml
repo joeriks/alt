@@ -1,0 +1,9 @@
+# Shared structure for anything with a date. Collections with
+# type: dated_entry get these fields and may add their own, but not change these.
+role: timeline
+title: title
+fields:
+  date:  { date, required, label: Date }
+  time:  { time, label: Time }
+  title: { text, required, label: Title }
+  note:  { longtext, label: Note }

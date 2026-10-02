@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:alt/ai.dart';
 import 'package:alt/ai_screen.dart';
+import 'package:alt/dev.dart';
 import 'package:alt/main.dart';
 import 'package:alt/ui.dart';
 import 'package:flutter/material.dart';
@@ -196,5 +197,19 @@ void main() {
     await tester.tap(find.text('Spara utkast'));
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
     await shot(tester, 'ai_sparat');
+
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('shot'),
+        child: MaterialApp(debugShowCheckedModeBanner: false, theme: altTheme(), home: const DevFilesScreen()),
+      ),
+    );
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pump(const Duration(seconds: 1));
+    await shot(tester, 'filer_utkast');
+    await tester.tap(find.textContaining('till GitHub'));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await shot(tester, 'spara_fraga');
   }, skip: !run);
 }

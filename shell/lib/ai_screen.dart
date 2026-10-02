@@ -30,6 +30,7 @@ class _AiScreenState extends State<AiScreen> {
   String? _error;
   late AiProposal? _proposal = widget.proposal;
   bool _saved = false;
+  bool _published = false;
 
   @override
   void initState() {
@@ -110,14 +111,24 @@ class _AiScreenState extends State<AiScreen> {
           ? null
           : p == null
           ? PrimaryButton('Skicka', onTap: _send)
-          : _saved
+          : _published
           ? PrimaryButton(
               'Nytt förslag',
               onTap: () => setState(() {
                 _proposal = null;
                 _saved = false;
+                _published = false;
                 _ctl.clear();
               }),
+            )
+          : _saved
+          ? PrimaryButton(
+              'Spara till GitHub',
+              onTap: () async {
+                if (await publishDrafts(context, [for (final f in p.files) f.path])) {
+                  setState(() => _published = true);
+                }
+              },
             )
           : Row(
               children: [
@@ -191,11 +202,13 @@ class _AiScreenState extends State<AiScreen> {
       children: [
         Text(p.summary),
         if (_saved)
-          const Padding(
-            padding: EdgeInsets.only(top: 12),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
             child: Text(
-              'Sparat som utkast. Tryck på en fil för att prova den.',
-              style: TextStyle(color: accent, fontSize: 15),
+              _published
+                  ? 'Sparat till GitHub och används nu i appen.'
+                  : 'Sparat som utkast. Tryck på en fil för att prova den, och spara sedan till GitHub.',
+              style: const TextStyle(color: accent, fontSize: 15),
             ),
           ),
         for (final f in p.files) ...[

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'engine.dart';
+import 'github.dart';
 import 'host.dart';
 import 'screens.dart';
 import 'ui.dart';
@@ -11,7 +12,7 @@ import 'workspace.dart';
 
 /// Utveckla: se filerna från receptrepot, redigera dem som utkast och prova
 /// utkasten. Utkast ligger bara på telefonen i `drafts/` och påverkar inget
-/// förrän de sparas till GitHub (nästa steg).
+/// förrän de sparas till GitHub med [publishDrafts].
 
 Future<Directory> draftsDir() async => Directory('${(await getApplicationSupportDirectory()).path}/drafts');
 
@@ -130,6 +131,15 @@ class _DevFilesScreenState extends State<DevFilesScreen> {
     return AltPage(
       back: 'Meny',
       title: 'Filer',
+      bottom: _drafts.isEmpty
+          ? null
+          : PrimaryButton(
+              _drafts.length == 1 ? 'Spara utkastet till GitHub' : 'Spara ${_drafts.length} utkast till GitHub',
+              onTap: () async {
+                await publishDrafts(context, _drafts.toList()..sort());
+                await _load();
+              },
+            ),
       child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(children: rows),
@@ -240,6 +250,12 @@ class _FileScreenState extends State<FileScreen> {
               children: [
                 const Expanded(
                   child: Text('utkast, inte sparat till GitHub', style: TextStyle(color: accent, fontSize: 15)),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    if (await publishDrafts(context, [widget.path])) await _load();
+                  },
+                  child: const Text('spara', style: TextStyle(color: accent)),
                 ),
                 TextButton(
                   onPressed: _discard,
@@ -424,3 +440,89 @@ Future<void> tryDraft(BuildContext context, String path, String text) async {
     ),
   );
 }
+
+/// Sparar utkasten för [paths] till receptrepot, efter en kontroll och en bekräftelse.
+/// Returnerar true om de sparades.
+Future<bool> publishDrafts(BuildContext context, List<String> paths) async {
+  final drafts = await allDrafts();
+  final files = {
+    for (final p in paths)
+      if (drafts.containsKey(p)) p: drafts[p]!,
+  };
+  if (files.isEmpty || !context.mounted) return false;
+  final ws = await Workspace.load(overlay: drafts);
+  final problems = [
+    for (final pr in ws.problems)
+      if (files.keys.any((p) => pr.contains(p.split('/').last) || (p.startsWith('lang/') && pr.startsWith('lang')))) pr,
+  ];
+  if (!context.mounted) return false;
+  if (problems.isNotEmpty) {
+    await _message(context, 'Rätta det här först', problems.join('\n\n'));
+    return false;
+  }
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1B18),
+      title: const Text('Spara till GitHub?', style: TextStyle(fontSize: 20)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Ändringen hamnar i ${defaultRepo.split('/').last} och börjar gälla i appen. '
+            'Den gamla versionen finns kvar i historiken på GitHub.',
+            style: const TextStyle(color: muted, fontSize: 15),
+          ),
+          const SizedBox(height: 12),
+          for (final p in files.keys) Text(p, style: _code),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Avbryt')),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Spara')),
+      ],
+    ),
+  );
+  if (ok != true || !context.mounted) return false;
+  final messenger = ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(const SnackBar(content: Text('Sparar till GitHub…'), duration: Duration(minutes: 1)));
+  try {
+    final names = files.keys.map((p) => p.split('/').last).join(', ');
+    final sha = await publishFiles(files, 'Ändrat i appen: $names');
+    for (final p in files.keys) {
+      await discardDraft(p);
+    }
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('Sparat till GitHub ($sha)'), persist: false));
+    return true;
+  } on PublishException catch (e) {
+    messenger.hideCurrentSnackBar();
+    if (context.mounted) await _message(context, 'Kunde inte spara', e.message);
+    return false;
+  }
+}
+
+Future<void> _message(BuildContext context, String title, String body) => showModalBottomSheet(
+  context: context,
+  backgroundColor: const Color(0xFF1A1B18),
+  builder: (ctx) => SafeArea(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: red),
+          ),
+          const SizedBox(height: 12),
+          Text(body),
+        ],
+      ),
+    ),
+  ),
+);

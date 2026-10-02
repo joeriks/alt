@@ -129,7 +129,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   Future<void> _askToken() => _askSecret(
     'GitHub-nyckel',
-    'Läsrätt till ${defaultRepo.split('/').last}. Sparas krypterad på telefonen.',
+    'Läs- och skrivrätt (Contents) till ${defaultRepo.split('/').last}. Sparas krypterad på telefonen.',
     setGithubToken,
     'nyckeln sparad, kör System / Hämta recept',
   );

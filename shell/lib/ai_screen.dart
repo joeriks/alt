@@ -117,6 +117,25 @@ class _AiScreenState extends State<AiScreen> {
     }
   }
 
+  /// Redigera frågan som AI:n skrev; Prova i editorn kör den, och listan här räknas om.
+  Future<void> _editQuery(AiProposal p, AiFile f) async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => EditScreen(path: f.path, text: f.content),
+      ),
+    );
+    if (saved != true) return;
+    final text = await readDraft(f.path) ?? f.content;
+    final next = AiProposal(
+      p.summary,
+      [for (final x in p.files) x.path == f.path ? AiFile(x.path, text) : x],
+      ore: p.ore,
+      run: p.run,
+    );
+    setState(() => _proposal = next);
+    await _runQuery(next);
+  }
+
   void _reset() => setState(() {
     _proposal = null;
     _results = null;
@@ -299,6 +318,8 @@ class _AiScreenState extends State<AiScreen> {
           InkWell(
             onTap: _saved
                 ? () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => FileScreen(path: f.path)))
+                : f.path == p.run
+                ? () => _editQuery(p, f)
                 : null,
             child: ConstrainedBox(
               constraints: const BoxConstraints(minHeight: 40),
@@ -313,6 +334,11 @@ class _AiScreenState extends State<AiScreen> {
                         text: _base.containsKey(f.path) ? '  ändrad' : '  ny',
                         style: const TextStyle(color: muted, fontSize: 15, fontWeight: FontWeight.w400),
                       ),
+                      if (!_saved && f.path == p.run)
+                        const TextSpan(
+                          text: '  redigera',
+                          style: TextStyle(color: accent, fontSize: 15, fontWeight: FontWeight.w400),
+                        ),
                       if (_saved)
                         const TextSpan(
                           text: '  ›',

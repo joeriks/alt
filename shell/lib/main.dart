@@ -227,6 +227,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     _Cmd('System / AI / Byt AI-tjänst', _switchAi),
     _Cmd('Utveckla / Filer', () => _push(const DevFilesScreen())),
     _Cmd('Utveckla / Fråga AI', () => _push(const AiScreen())),
+    _Cmd('Utveckla / Ny fråga', () => newQuery(context)),
     _Cmd('System / Schema / Starta', () async {
       await requestNotificationPermission();
       final d = await scheduleAll();

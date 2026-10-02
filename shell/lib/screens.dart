@@ -538,9 +538,10 @@ class QueryResults extends StatelessWidget {
 }
 
 class QueryScreen extends StatefulWidget {
-  const QueryScreen({super.key, required this.query, required this.collections});
+  const QueryScreen({super.key, required this.query, required this.collections, this.back = 'Meny'});
   final Query query;
   final List<Collection> collections;
+  final String back;
 
   @override
   State<QueryScreen> createState() => _QueryScreenState();
@@ -563,7 +564,7 @@ class _QueryScreenState extends State<QueryScreen> {
   @override
   Widget build(BuildContext context) {
     return AltPage(
-      back: 'Meny',
+      back: widget.back,
       title: widget.query.label,
       child: RefreshIndicator(
         onRefresh: _load,

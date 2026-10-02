@@ -238,5 +238,25 @@ void main() {
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
     await tester.pump(const Duration(seconds: 6));
     await shot(tester, 'ai_svar_lista');
+
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('shot'),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: altTheme(),
+          home: const EditScreen(
+            path: 'apps/memory_bank/upcoming.query.yaml',
+            text: 'label: Upcoming\nfrom: private_calendar\nwhere:\n  date: { from: today, to: today+14d }\nsort: date\n',
+          ),
+        ),
+      ),
+    );
+    await shot(tester, 'fraga_redigera');
+    await tester.tap(find.text('Prova'));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await shot(tester, 'fraga_prova');
   }, skip: !run);
 }

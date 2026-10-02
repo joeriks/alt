@@ -397,6 +397,18 @@ Future<void> tryDraft(BuildContext context, String path, String text) async {
     final overlay = {...await allDrafts(), path: text};
     final ws = await Workspace.load(overlay: overlay);
     final hit = ws.problems.where((p) => p.contains(path.split('/').last)).toList();
+    if (path.endsWith('.query.yaml') && hit.isEmpty) {
+      final name = path.split('/').last.replaceAll('.query.yaml', '');
+      final q = ws.queries.where((q) => q.name == name).firstOrNull;
+      if (q != null && context.mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => QueryScreen(query: q, collections: ws.collections, back: 'Utkast'),
+          ),
+        );
+        return;
+      }
+    }
     if (path.endsWith('.collection.yaml') && hit.isEmpty) {
       final name = path.split('/').last.replaceAll('.collection.yaml', '');
       final c = ws.collection(name);
@@ -526,3 +538,86 @@ Future<void> _message(BuildContext context, String title, String body) => showMo
     ),
   ),
 );
+
+/// Skapar en ny fråga: välj app och namn, skriv frågan och prova den innan den sparas.
+Future<void> newQuery(BuildContext context) async {
+  final ws = await Workspace.load();
+  final apps = <String, String>{for (final c in ws.collections) c.app: c.appLabel};
+  if (apps.isEmpty || !context.mounted) return;
+  var app = apps.keys.first;
+  final ctl = TextEditingController();
+  String? error;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1B18),
+        title: const Text('Ny fråga', style: TextStyle(fontSize: 20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (apps.length > 1)
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final e in apps.entries)
+                    ChoiceChip(
+                      label: Text(e.value),
+                      selected: app == e.key,
+                      onSelected: (_) => setState(() => app = e.key),
+                    ),
+                ],
+              ),
+            TextField(
+              controller: ctl,
+              autofocus: true,
+              cursorColor: accent,
+              decoration: const InputDecoration(hintText: 'namn, t.ex. open_tasks'),
+            ),
+            if (error != null) Text(error!, style: const TextStyle(color: red, fontSize: 15)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Avbryt')),
+          TextButton(
+            onPressed: () {
+              if (!RegExp(r'^[a-zåäö][a-zåäö0-9_]*$').hasMatch(ctl.text.trim())) {
+                setState(() => error = 'Små bokstäver, siffror och _, börja med en bokstav.');
+              } else {
+                Navigator.pop(ctx, true);
+              }
+            },
+            child: const Text('Skapa'),
+          ),
+        ],
+      ),
+    ),
+  );
+  final name = ctl.text.trim();
+  ctl.dispose();
+  if (ok != true || !context.mounted) return;
+  final first = ws.collections.firstWhere((c) => c.app == app);
+  final template = [
+    'label: ${name[0].toUpperCase()}${name.substring(1).replaceAll('_', ' ')}',
+    'from: ${first.name}',
+    'where:',
+    if (first.fields.any((f) => f.type == 'bool'))
+      '  ${first.fields.firstWhere((f) => f.type == 'bool').name}: false'
+    else
+      '  # ${first.titleField}: { contains: text }',
+    if (first.dateField != null) '  ${first.dateField!.name}: { from: today, to: today+14d }',
+    if (first.dateField != null) 'sort: ${first.dateField!.name}',
+    '',
+  ].join('\n');
+  final path = 'apps/$app/$name.query.yaml';
+  final saved = await Navigator.of(context).push<bool>(
+    MaterialPageRoute(
+      builder: (_) => EditScreen(path: path, text: template),
+    ),
+  );
+  // Efter sparat utkast: visa filen, där man kan prova den igen och spara till GitHub.
+  if (saved == true && context.mounted) {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => FileScreen(path: path)));
+  }
+}

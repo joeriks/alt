@@ -41,6 +41,10 @@ class _AiScreenState extends State<AiScreen> {
 
   /// Posterna som en fråga från AI:n gav, räknade på telefonen.
   List<(Collection, Rec)>? _results;
+
+  /// Förslaget man vill ändra i; nästa fråga skickas med det som utgångspunkt.
+  AiProposal? _previous;
+  bool _showFiles = false;
   bool _manySources = false;
 
   @override
@@ -82,11 +86,21 @@ class _AiScreenState extends State<AiScreen> {
       _error = null;
     });
     try {
-      final p = await askAi(ask, _files);
+      final prev = _previous;
+      // En uppföljning skickar med förra förslaget, så att AI:n bygger vidare på det.
+      final p = prev == null
+          ? await askAi(ask, _files)
+          : await askAi(
+              'Du gav nyss det här förslaget: ${prev.summary}\n'
+              'Filerna ovan innehåller redan förslaget${prev.run.isEmpty ? '' : ', och frågan som kördes är ${prev.run}'}. '
+              'Svara med hela förslaget igen, med den här ändringen:\n$ask',
+              {..._files, for (final f in prev.files) f.path: f.content},
+            );
       if (!mounted) return;
       setState(() {
         _base = _files;
         _proposal = p;
+        _previous = null;
       });
       await _runQuery(p);
     } on AiException catch (e) {
@@ -137,6 +151,8 @@ class _AiScreenState extends State<AiScreen> {
   }
 
   void _reset() => setState(() {
+    _previous = null;
+    _showFiles = false;
     _proposal = null;
     _results = null;
     _saved = false;
@@ -209,8 +225,10 @@ class _AiScreenState extends State<AiScreen> {
                       height: 56,
                       child: OutlinedButton(
                         onPressed: () => setState(() {
+                          _previous = _proposal;
                           _proposal = null;
                           _results = null;
+                          _ctl.clear();
                         }),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: accent,
@@ -236,13 +254,21 @@ class _AiScreenState extends State<AiScreen> {
           'Dina poster skickas aldrig.',
           style: const TextStyle(color: muted, fontSize: 15),
         ),
+        if (_previous != null) ...[
+          const SizedBox(height: 12),
+          Text('Förra förslaget: ${_previous!.summary}', style: const TextStyle(color: accent, fontSize: 15)),
+          const Text(
+            'Skriv vad som ska ändras, så bygger AI:n vidare på det.',
+            style: TextStyle(color: muted, fontSize: 15),
+          ),
+        ],
         const SizedBox(height: 16),
         TextField(
           controller: _ctl,
           enabled: !_busy,
           minLines: 4,
           maxLines: 10,
-          autofocus: widget.ask.isEmpty,
+          autofocus: widget.ask.isEmpty || _previous != null,
           cursorColor: accent,
           textCapitalization: TextCapitalization.sentences,
           decoration: const InputDecoration(
@@ -297,23 +323,42 @@ class _AiScreenState extends State<AiScreen> {
             ),
           ),
         if (_results != null) ...[
-          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.only(top: 20, bottom: 4),
+            child: Text(
+              _results!.length == 1 ? 'Svar: 1 post' : 'Svar: ${_results!.length} poster',
+              style: const TextStyle(color: accent, fontWeight: FontWeight.w700),
+            ),
+          ),
           QueryResults(items: _results!, onChanged: () => _runQuery(p), showCollection: _manySources),
           if (!_saved)
             const Padding(
-              padding: EdgeInsets.only(top: 24),
+              padding: EdgeInsets.only(top: 20),
               child: Text(
-                'Vill du kunna köra listan igen? Spara frågan i menyn:',
+                'Listan räknades fram på telefonen och är inte sparad. Vill du ha den som menyval trycker du Spara i menyn.',
                 style: TextStyle(color: muted, fontSize: 15),
               ),
             ),
+          InkWell(
+            onTap: () => setState(() => _showFiles = !_showFiles),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _showFiles ? 'Dölj frågan' : 'Visa och redigera frågan ›',
+                  style: const TextStyle(color: accent, fontSize: 15),
+                ),
+              ),
+            ),
+          ),
         ],
         if (_error != null)
           Padding(
             padding: const EdgeInsets.only(top: 16),
             child: Text(_error!, style: const TextStyle(color: red)),
           ),
-        for (final f in p.files) ...[
+        for (final f in (p.run.isEmpty || _showFiles ? p.files : const <AiFile>[])) ...[
           const SizedBox(height: 20),
           InkWell(
             onTap: _saved

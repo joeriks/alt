@@ -26,6 +26,12 @@ class _Turn {
   String? label;
   bool manySources = false;
   bool published = false;
+
+  /// Samlingarna som gäller för svaret, för att visa och spara föreslagna poster.
+  List<Collection> collections = const [];
+
+  /// Föreslagna poster som sparats, per index i proposal.records.
+  final saved = <int, Rec>{};
 }
 
 /// Fråga AI som en chatt: fråga om dina poster, be om ändringar och ställ följdfrågor.
@@ -51,7 +57,7 @@ class _AiScreenState extends State<AiScreen> {
 
   /// Receptrepots filer med utkast ovanpå.
   Map<String, String> _files = {};
-  AiService _service = AiService.claude;
+  AiModel _model = aiModels.first;
 
   @override
   void initState() {
@@ -60,7 +66,11 @@ class _AiScreenState extends State<AiScreen> {
       if (widget.proposal != null) {
         final t = _Turn(widget.ask)
           ..proposal = widget.proposal
-          ..busy = false;
+          ..busy = false
+          ..collections = Workspace.fromFiles({
+            ..._files,
+            for (final f in widget.proposal!.files) f.path: f.content,
+          }).collections;
         setState(() => _turns.add(t));
         await _runQuery(t);
       } else if (widget.send && widget.ask.trim().isNotEmpty) {
@@ -80,11 +90,11 @@ class _AiScreenState extends State<AiScreen> {
 
   Future<void> _load() async {
     final files = await filesForAi(await allDrafts());
-    final service = await aiService();
+    final chosen = await aiModel();
     if (mounted) {
       setState(() {
         _files = files;
-        _service = service;
+        _model = chosen;
       });
     }
   }
@@ -121,6 +131,7 @@ class _AiScreenState extends State<AiScreen> {
     _toBottom();
     try {
       t.proposal = await askAi(ask, files, history: history);
+      t.collections = Workspace.fromFiles({...files, for (final f in t.proposal!.files) f.path: f.content}).collections;
       await _runQuery(t);
     } on AiException catch (e) {
       t.error = e.message;
@@ -228,7 +239,7 @@ class _AiScreenState extends State<AiScreen> {
           if (_turns.isEmpty)
             Text(
               'Fråga om dina poster, till exempel "vad har jag i morgon?", eller be om en ändring. '
-              'Filerna från ${defaultRepo.split('/').last} skickas till ${_service.label} (${_service.modelName}), '
+              'Filerna från ${defaultRepo.split('/').last} skickas till ${_model.name}, '
               'men dina poster skickas aldrig: listor räknas fram på telefonen.',
               style: _small,
             ),
@@ -255,7 +266,7 @@ class _AiScreenState extends State<AiScreen> {
                 children: [
                   const LinearProgressIndicator(color: accent, backgroundColor: line),
                   const SizedBox(height: 6),
-                  Text('${_service.label} skriver…', style: _small),
+                  Text('${_model.name} skriver…', style: _small),
                 ],
               ),
             ),
@@ -263,7 +274,7 @@ class _AiScreenState extends State<AiScreen> {
             if (p.summary.trim().isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Text(p.summary, style: results == null && p.files.isEmpty ? null : _small),
+                child: Text(p.summary, style: results == null && p.files.isEmpty && p.records.isEmpty ? null : _small),
               ),
             if (results != null) ...[
               Padding(
@@ -275,6 +286,7 @@ class _AiScreenState extends State<AiScreen> {
               ),
               QueryResults(items: results, onChanged: () => _runQuery(t), showCollection: t.manySources),
             ],
+            for (var i = 0; i < p.records.length; i++) _record(t, i),
             if (p.files.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
@@ -304,6 +316,99 @@ class _AiScreenState extends State<AiScreen> {
               padding: const EdgeInsets.only(top: 8),
               child: Text(t.error!, style: const TextStyle(color: red)),
             ),
+        ],
+      ),
+    );
+  }
+
+  /// En post som AI:n föreslår: visas som ett kort, sparas först när du trycker Spara.
+  Widget _record(_Turn t, int i) {
+    final r = t.proposal!.records[i];
+    final c = t.collections.where((c) => c.name == r.collection).firstOrNull;
+    if (c == null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Text(
+          'AI:n ville lägga en post i ${r.collection}, men den samlingen finns inte.',
+          style: const TextStyle(color: red),
+        ),
+      );
+    }
+    final values = {
+      for (final f in c.fields)
+        if (r.values[f.name] != null && r.values[f.name] != '') f.name: r.values[f.name],
+    };
+    final missing = [
+      for (final f in c.fields)
+        if (f.required && values[f.name] == null) f.label.toLowerCase(),
+    ];
+    final saved = t.saved[i];
+    final date = c.dateField == null ? null : DateTime.tryParse('${values[c.dateField!.name] ?? ''}');
+    final sub = [
+      if (date != null) dayLabel(date),
+      if (c.timeField != null) '${values[c.timeField!.name] ?? ''}',
+      c.label,
+    ].where((x) => x.isNotEmpty).join('  ');
+    final rest = [
+      for (final f in c.fields)
+        if (f.name != c.titleField && f != c.dateField && f != c.timeField && values[f.name] != null)
+          '${f.label}: ${f.type == 'bool' ? (values[f.name] == true ? 'ja' : 'nej') : values[f.name]}',
+    ];
+
+    Future<void> save() async {
+      final rec = await saveRecord(c, values);
+      if (!mounted) return;
+      setState(() => t.saved[i] = rec);
+      showUndo(context, 'Sparad: ${rec.str(c.titleField)}', () async {
+        await deleteRecord(rec);
+        if (mounted) setState(() => t.saved.remove(i));
+      });
+    }
+
+    Future<void> edit() async {
+      final rec = await Navigator.of(context).push<Rec>(
+        MaterialPageRoute(
+          builder: (_) => FormScreen(collection: c, back: 'Fråga AI', initial: values),
+        ),
+      );
+      if (rec != null && mounted) setState(() => t.saved[i] = rec);
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.only(left: 12),
+      decoration: BoxDecoration(
+        border: Border(left: BorderSide(color: saved == null ? accent : line, width: 3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${values[c.titleField] ?? '(utan titel)'}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          if (sub.isNotEmpty) Text(sub, style: _small),
+          for (final x in rest) Text(x, style: _small),
+          if (missing.isNotEmpty)
+            Text('Saknar ${missing.join(', ')}.', style: const TextStyle(color: red, fontSize: 14)),
+          Wrap(
+            spacing: 20,
+            children: [
+              if (saved != null) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text('sparad', style: _small),
+                ),
+                _link('Öppna ›', () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => RecordScreen(collection: c, rec: saved),
+                    ),
+                  );
+                }),
+              ] else ...[
+                if (missing.isEmpty) _link('Spara', save),
+                _link('Ändra först ›', edit),
+              ],
+            ],
+          ),
         ],
       ),
     );

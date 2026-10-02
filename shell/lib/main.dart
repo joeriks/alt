@@ -138,20 +138,75 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     'Claude-nyckel',
     'En API-nyckel från console.anthropic.com. Sparas krypterad på telefonen.',
     setClaudeKey,
-    'nyckeln sparad, Fråga AI använder nu Claude',
+    'nyckeln sparad, välj modell under System / AI / Välj modell',
   );
 
   Future<void> _askOpenAiKey() => _askSecret(
     'OpenAI-nyckel',
     'En API-nyckel från platform.openai.com. Sparas krypterad på telefonen.',
     setOpenAiKey,
-    'nyckeln sparad, Fråga AI använder nu OpenAI',
+    'nyckeln sparad, välj modell under System / AI / Välj modell',
   );
 
-  Future<void> _switchAi() async {
-    final next = (await aiService()) == AiService.claude ? AiService.openai : AiService.claude;
-    await setAiService(next);
-    _say('Fråga AI använder nu ${next.label} (${next.modelName})');
+  Future<void> _chooseModel() async {
+    final current = await aiModel();
+    final hasKey = {
+      AiService.claude: ((await claudeKey()) ?? '').isNotEmpty,
+      AiService.openai: ((await openAiKey()) ?? '').isNotEmpty,
+    };
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<AiModel>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1B18),
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.all(24),
+          children: [
+            const Text('Välj AI-modell', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const Padding(
+              padding: EdgeInsets.only(top: 4, bottom: 8),
+              child: Text(
+                'Billigast först. Dyrare modeller förstår svårare frågor bättre.',
+                style: TextStyle(color: muted, fontSize: 15),
+              ),
+            ),
+            for (final m in aiModels)
+              InkWell(
+                onTap: () => Navigator.pop(ctx, m),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 56),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(m.name, style: TextStyle(color: m.id == current.id ? accent : fg)),
+                        Text(
+                          [
+                            'ca ${m.typicalOre.round()} öre per fråga',
+                            if (!hasKey[m.service]!) 'ingen ${m.service.label}-nyckel',
+                            if (m.id == current.id) 'vald',
+                          ].join(' · '),
+                          style: const TextStyle(color: muted, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    await setAiModel(picked);
+    _say(
+      hasKey[picked.service]!
+          ? 'Fråga AI använder nu ${picked.name}'
+          : 'vald: ${picked.name}, lägg in en ${picked.service.label}-nyckel under System / AI',
+    );
   }
 
   Future<void> _askSecret(String title, String help, Future<void> Function(String) save, String done) async {
@@ -224,7 +279,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     _Cmd('System / GitHub-nyckel', _askToken),
     _Cmd('System / AI / Claude-nyckel', _askClaudeKey),
     _Cmd('System / AI / OpenAI-nyckel', _askOpenAiKey),
-    _Cmd('System / AI / Byt AI-tjänst', _switchAi),
+    _Cmd('System / AI / Välj modell', _chooseModel),
     _Cmd('Utveckla / Filer', () => _push(const DevFilesScreen())),
     _Cmd('Utveckla / Fråga AI', () => _push(const AiScreen())),
     _Cmd('Utveckla / Ny fråga', () => newQuery(context)),

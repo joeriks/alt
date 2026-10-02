@@ -13,19 +13,53 @@ import 'workspace.dart';
 
 const _secure = FlutterSecureStorage();
 
-/// Billiga modeller: en vanlig ändring kostar några öre.
-const model = 'claude-haiku-4-5';
-const openAiModel = 'gpt-5.4-nano';
-
-/// Pris i USD per miljon token (in, ut) och en ungefärlig växelkurs, för att visa kostnaden.
-const _prices = {model: (1.0, 5.0), openAiModel: (0.20, 1.25)};
 const _sekPerUsd = 10.0;
 
 enum AiService { claude, openai }
 
 extension AiServiceName on AiService {
   String get label => this == AiService.claude ? 'Claude' : 'OpenAI';
-  String get modelName => this == AiService.claude ? model : openAiModel;
+}
+
+/// En modell man kan välja, med pris i USD per miljon token (in, ut).
+class AiModel {
+  const AiModel(this.service, this.id, this.name, this.usdIn, this.usdOut);
+  final AiService service;
+  final String id;
+  final String name;
+  final double usdIn;
+  final double usdOut;
+
+  /// Ungefärligt pris för en vanlig fråga (4 000 token in, 1 500 ut), i öre.
+  double get typicalOre => (4000 * usdIn + 1500 * usdOut) / 1e6 * _sekPerUsd * 100;
+}
+
+/// De billigaste först. Den första för varje tjänst är standard.
+const aiModels = [
+  AiModel(AiService.claude, 'claude-haiku-4-5', 'Claude Haiku 4.5', 1, 5),
+  AiModel(AiService.claude, 'claude-sonnet-5-5', 'Claude Sonnet 5.5', 2, 10),
+  AiModel(AiService.claude, 'claude-opus-5-5', 'Claude Opus 5.5', 4, 20),
+  AiModel(AiService.openai, 'gpt-5.4-nano', 'GPT-5.4 nano', 0.20, 1.25),
+  AiModel(AiService.openai, 'gpt-5.4-mini', 'GPT-5.4 mini', 0.75, 4.50),
+];
+
+/// Standardmodellerna, som också används i testerna.
+const model = 'claude-haiku-4-5';
+const openAiModel = 'gpt-5.4-nano';
+
+AiModel? modelById(String id) => aiModels.where((m) => id == m.id || id.startsWith('${m.id}-')).firstOrNull;
+
+/// Den valda modellen; utan val den första för den valda tjänsten.
+Future<AiModel> aiModel() async {
+  final service = await aiService();
+  final chosen = modelById(await _secure.read(key: 'ai_model') ?? '');
+  if (chosen != null && chosen.service == service) return chosen;
+  return aiModels.firstWhere((m) => m.service == service);
+}
+
+Future<void> setAiModel(AiModel m) async {
+  await _secure.write(key: 'ai_model', value: m.id);
+  await setAiService(m.service);
 }
 
 Future<String?> claudeKey() => _secure.read(key: 'anthropic_key');
@@ -53,6 +87,9 @@ Ni har ett samtal. Användaren skriver antingen en ändring, en fråga om sina p
 1. En ändring (t.ex. "lägg till en samling för böcker"): svara med de filer som ska ändras eller skapas, med HELA det nya innehållet i varje fil. Ändra bara det som behövs och rör inte andra filer. run är "".
 2. En fråga om användarens poster (t.ex. "vilka uppgifter har jag kvar?", "vad händer nästa vecka?"): du ser ALDRIG posterna, bara samlingarnas filer. Skriv en sparad fråga, apps/<app>/<namn>.query.yaml, som tar fram rätt poster. Lägg den i files och sätt run till dess sökväg; appen kör den på telefonen och visar listan. Lägg också till en svensk etikett för den i lang/sv.yaml under queries.
 3. En fråga om hur appen fungerar: svara i summary och lämna files tom. run är "".
+4. Användaren vill lägga in något (t.ex. "tandläkare tisdag kl 14", "lägg till mammas födelsedag 11 oktober"): föreslå en eller flera nya poster i records. collection är samlingens namn (filnamnet utan .collection.yaml). values_json är ett JSON-objekt med fältnamn som nycklar: datum som "YYYY-MM-DD", tid som "HH:MM", bool som true/false, tal som tal. Räkna ut datum utifrån dagens datum. Välj den samling som passar bäst och fyll i alla obligatoriska fält. files är tom och run är "", om inte användaren också ber om en ändring. Användaren ser posterna och sparar dem själv.
+
+Om inget passar ska records vara en tom lista. Skicka alltid med summary, run, files och records.
 
 Skriv alltid summary på svenska, en eller två meningar: vad du ändrade, vad listan visar eller svaret på frågan.
 
@@ -90,10 +127,18 @@ class AiFile {
   final String content;
 }
 
+/// En ny post som AI:n föreslår utifrån det användaren skrev. Sparas först när användaren trycker Spara.
+class AiRecord {
+  AiRecord(this.collection, this.values);
+  final String collection;
+  final Map<String, dynamic> values;
+}
+
 class AiProposal {
-  AiProposal(this.summary, this.files, {this.ore, this.run = ''});
+  AiProposal(this.summary, this.files, {this.ore, this.run = '', this.records = const []});
   final String summary;
   final List<AiFile> files;
+  final List<AiRecord> records;
 
   /// Sökvägen till en fråga (.query.yaml) bland [files] som ska köras direkt, eller ''.
   final String run;
@@ -104,9 +149,9 @@ class AiProposal {
 
 /// Kostnad i öre för ett anrop med [modelId], från antal token in och ut.
 double? costOre(String modelId, num? input, num? output) {
-  final price = _prices[modelId];
-  if (price == null || input == null || output == null) return null;
-  return (input * price.$1 + output * price.$2) / 1e6 * _sekPerUsd * 100;
+  final m = modelById(modelId);
+  if (m == null || input == null || output == null) return null;
+  return (input * m.usdIn + output * m.usdOut) / 1e6 * _sekPerUsd * 100;
 }
 
 class AiException implements Exception {
@@ -121,6 +166,18 @@ const _schema = {
   'properties': {
     'summary': {'type': 'string'},
     'run': {'type': 'string'},
+    'records': {
+      'type': 'array',
+      'items': {
+        'type': 'object',
+        'properties': {
+          'collection': {'type': 'string'},
+          'values_json': {'type': 'string'},
+        },
+        'required': ['collection', 'values_json'],
+        'additionalProperties': false,
+      },
+    },
     'files': {
       'type': 'array',
       'items': {
@@ -134,7 +191,7 @@ const _schema = {
       },
     },
   },
-  'required': ['summary', 'run', 'files'],
+  'required': ['summary', 'run', 'files', 'records'],
   'additionalProperties': false,
 };
 
@@ -150,14 +207,26 @@ String _userMessage(String ask, Map<String, String> files, List<AiTurn> history)
       ? ''
       : 'Tidigare i samtalet (filerna ovan innehåller redan dina tidigare förslag):\n'
             '${[for (final t in history) 'Användaren: ${t.ask}\nDu: ${t.summary}'].join('\n')}\n\n';
-  return 'Receptrepots filer just nu:\n\n$listing\n${earlier}Användarens nya meddelande:\n$ask';
+  final now = DateTime.now();
+  const days = ['måndag', 'tisdag', 'onsdag', 'torsdag', 'fredag', 'lördag', 'söndag'];
+  final today =
+      '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}, ${days[now.weekday - 1]}';
+  return 'Receptrepots filer just nu:\n\n$listing\nI dag är det $today.\n\n'
+      '${earlier}Användarens nya meddelande:\n$ask';
 }
 
 /// Bygger förfrågan till Claude. [files] är relativ sökväg → innehåll.
-Map<String, dynamic> buildRequest(String ask, Map<String, String> files, [List<AiTurn> history = const []]) => {
-  'model': model,
-  'max_tokens': 8000,
+Map<String, dynamic> buildRequest(
+  String ask,
+  Map<String, String> files, [
+  List<AiTurn> history = const [],
+  String modelId = model,
+]) => {
+  'model': modelId,
+  // Sonnet och Opus tänker alltid först, så de behöver mer utrymme; låg effort håller nere priset.
+  'max_tokens': modelId == model ? 8000 : 16000,
   'output_config': {
+    if (modelId != model) 'effort': 'low',
     'format': {'type': 'json_schema', 'schema': _schema},
   },
   'system': aiRules,
@@ -167,8 +236,13 @@ Map<String, dynamic> buildRequest(String ask, Map<String, String> files, [List<A
 };
 
 /// Bygger förfrågan till OpenAI (Chat Completions med JSON-schema).
-Map<String, dynamic> buildOpenAiRequest(String ask, Map<String, String> files, [List<AiTurn> history = const []]) => {
-  'model': openAiModel,
+Map<String, dynamic> buildOpenAiRequest(
+  String ask,
+  Map<String, String> files, [
+  List<AiTurn> history = const [],
+  String modelId = openAiModel,
+]) => {
+  'model': modelId,
   'max_completion_tokens': 8000,
   'reasoning_effort': 'low',
   'response_format': {
@@ -203,13 +277,26 @@ AiProposal _proposal(String text, double? ore) {
   if (run.isNotEmpty && !files.any((f) => f.path == run)) {
     throw AiException('AI:n bad om att köra $run, men skickade inte med den filen.');
   }
-  return AiProposal((data['summary'] ?? '').toString(), files, ore: ore, run: run);
+  final records = <AiRecord>[];
+  for (final r in (data['records'] as List? ?? const [])) {
+    final collection = (r['collection'] ?? '').toString().trim();
+    if (!RegExp(r'^[a-zåäö][a-zåäö0-9_]*$').hasMatch(collection)) {
+      throw AiException('AI:n föreslog en post i en okänd samling: $collection');
+    }
+    try {
+      final v = jsonDecode((r['values_json'] ?? '{}').toString());
+      records.add(AiRecord(collection, Map<String, dynamic>.from(v as Map)));
+    } catch (_) {
+      throw AiException('AI:n föreslog en post som inte gick att läsa.');
+    }
+  }
+  return AiProposal((data['summary'] ?? '').toString(), files, ore: ore, run: run, records: records);
 }
 
 const _tooLong = 'Svaret blev för långt och avbröts. Försök med en mindre ändring.';
 
 /// Tolkar Claudes svar. Kastar AiException om Claude avböjde eller svaret blev avkortat.
-AiProposal parseResponse(Map<String, dynamic> res) {
+AiProposal parseResponse(Map<String, dynamic> res, [String modelId = model]) {
   final stop = res['stop_reason'];
   if (stop == 'refusal') throw AiException('Claude avböjde förfrågan.');
   if (stop == 'max_tokens') throw AiException(_tooLong);
@@ -221,11 +308,11 @@ AiProposal parseResponse(Map<String, dynamic> res) {
   final input = usage == null
       ? null
       : (usage['input_tokens'] as num? ?? 0) + (usage['cache_creation_input_tokens'] as num? ?? 0);
-  return _proposal(text, costOre(model, input, usage?['output_tokens'] as num?));
+  return _proposal(text, costOre(modelId, input, usage?['output_tokens'] as num?));
 }
 
 /// Tolkar OpenAIs svar.
-AiProposal parseOpenAiResponse(Map<String, dynamic> res) {
+AiProposal parseOpenAiResponse(Map<String, dynamic> res, [String modelId = openAiModel]) {
   final choice = ((res['choices'] as List?) ?? const []).firstOrNull as Map?;
   if (choice == null) throw AiException('Svaret gick inte att läsa.');
   final message = choice['message'] as Map? ?? const {};
@@ -234,13 +321,14 @@ AiProposal parseOpenAiResponse(Map<String, dynamic> res) {
   final usage = res['usage'] as Map<String, dynamic>?;
   return _proposal(
     (message['content'] ?? '').toString(),
-    costOre(openAiModel, usage?['prompt_tokens'] as num?, usage?['completion_tokens'] as num?),
+    costOre(modelId, usage?['prompt_tokens'] as num?, usage?['completion_tokens'] as num?),
   );
 }
 
 /// Skickar ändringen till den valda AI-tjänsten och returnerar förslaget.
 Future<AiProposal> askAi(String ask, Map<String, String> files, {List<AiTurn> history = const []}) async {
-  final service = await aiService();
+  final chosen = await aiModel();
+  final service = chosen.service;
   final key = service == AiService.claude ? await claudeKey() : await openAiKey();
   final name = service.label;
   if (key == null || key.isEmpty) {
@@ -279,7 +367,7 @@ Future<AiProposal> askAi(String ask, Map<String, String> files, {List<AiTurn> hi
     }
     if (res.statusCode != 200) throw AiException('Fel ${res.statusCode} från $name: ${apiMessage()}');
     final json = jsonDecode(text) as Map<String, dynamic>;
-    return service == AiService.claude ? parseResponse(json) : parseOpenAiResponse(json);
+    return service == AiService.claude ? parseResponse(json, chosen.id) : parseOpenAiResponse(json, chosen.id);
   } on SocketException {
     throw AiException('Ingen kontakt med $name. Är du ansluten till internet?');
   } finally {

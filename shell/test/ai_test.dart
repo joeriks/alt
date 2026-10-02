@@ -84,6 +84,60 @@ void main() {
     expect(() => parseResponse(reply({}, stop: 'max_tokens')), throwsA(isA<AiException>()));
   });
 
+  test('poster föreslås med samling och värden', () {
+    final p = parseResponse(
+      reply({
+        'summary': 'En post i Privat kalender.',
+        'run': '',
+        'files': [],
+        'records': [
+          {
+            'collection': 'private_calendar',
+            'values_json': '{"date":"2026-10-06","time":"14:00","title":"Tandläkare"}',
+          },
+        ],
+      }),
+    );
+    expect(p.records.single.collection, 'private_calendar');
+    expect(p.records.single.values['time'], '14:00');
+    expect(
+      () => parseResponse(
+        reply({
+          'summary': '',
+          'run': '',
+          'files': [],
+          'records': [
+            {'collection': '../x', 'values_json': '{}'},
+          ],
+        }),
+      ),
+      throwsA(isA<AiException>()),
+    );
+    expect(
+      () => parseResponse(
+        reply({
+          'summary': '',
+          'run': '',
+          'files': [],
+          'records': [
+            {'collection': 'tasks', 'values_json': 'inte json'},
+          ],
+        }),
+      ),
+      throwsA(isA<AiException>()),
+    );
+  });
+
+  test('modellval', () {
+    expect(modelById('claude-haiku-4-5-20251001')?.name, modelById('claude-haiku-4-5')?.name);
+    expect(modelById('okänd'), isNull);
+    final r = buildRequest('x', {}, const [], 'claude-sonnet-5-5');
+    expect(r['model'], 'claude-sonnet-5-5');
+    expect(r['max_tokens'], 16000);
+    expect(jsonEncode(r), contains('"effort":"low"'));
+    expect(jsonEncode(buildRequest('x', {})), isNot(contains('effort')));
+  });
+
   test('kostnaden räknas i öre', () {
     // Haiku, 2000 in och 600 ut: (2000 * 1 + 600 * 5) / 1e6 USD = 0,005 USD = 5 öre
     expect(costOre('claude-haiku-4-5', 2000, 600), closeTo(5, 0.001));

@@ -253,6 +253,41 @@ void main() {
         child: MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: altTheme(),
+          home: AiScreen(
+            key: const Key('post'),
+            ask: 'tandläkare på tisdag kl 14, ta med frikortet',
+            proposal: AiProposal(
+              'Jag lägger tandläkartiden i Privat kalender.',
+              [],
+              ore: 0.6,
+              records: [
+                AiRecord('private_calendar', {
+                  'date': _iso(DateTime.now().add(const Duration(days: 4))),
+                  'time': '14:00',
+                  'title': 'Tandläkare',
+                  'note': 'Ta med frikortet',
+                }),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(seconds: 6));
+    await shot(tester, 'ai_post');
+    await tester.tap(find.text('Spara').first);
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(milliseconds: 500));
+    await shot(tester, 'ai_post_sparad');
+    await tester.pump(const Duration(seconds: 6));
+
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('shot'),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: altTheme(),
           home: const EditScreen(
             path: 'apps/memory_bank/upcoming.query.yaml',
             text:

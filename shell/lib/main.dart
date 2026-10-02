@@ -27,6 +27,38 @@ class _Cmd {
   _Cmd(this.label, this.action);
   final String label;
   final Future<void> Function() action;
+
+  List<String> get segments => label.split('/').map((s) => s.trim()).toList();
+}
+
+/// Menyn på en nivå i trädet. Etiketter som "Minnesbank / Privat kalender" delas
+/// vid `/`. Returnerar (namn, index) för kommandon och (namn, null) för undermenyer.
+List<(String, int?)> menuLevel(List<String> labels, List<String> path) {
+  final out = <(String, int?)>[];
+  final folders = <String>{};
+  for (var i = 0; i < labels.length; i++) {
+    final segs = labels[i].split('/').map((s) => s.trim()).toList();
+    if (segs.length <= path.length) continue;
+    var under = true;
+    for (var k = 0; k < path.length; k++) {
+      if (segs[k] != path[k]) under = false;
+    }
+    if (!under) continue;
+    final next = segs[path.length];
+    if (segs.length == path.length + 1) {
+      out.add((next, i));
+    } else if (folders.add(next)) {
+      out.add((next, null));
+    }
+  }
+  return out;
+}
+
+/// En rad i menyn: antingen ett kommando eller en undermeny (cmd == null).
+class _Entry {
+  _Entry(this.label, this.cmd);
+  final String label;
+  final _Cmd? cmd;
 }
 
 class Home extends StatefulWidget {
@@ -38,6 +70,9 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> with WidgetsBindingObserver {
   final _q = TextEditingController();
+
+  /// Var i menyträdet man står, till exempel ['Minnesbank'].
+  final List<String> _path = [];
   List<Recipe> _recipes = [];
   Workspace _ws = Workspace([], [], []);
   List<Map<String, dynamic>> _runs = [];
@@ -177,66 +212,119 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     await _reload();
   }
 
+  List<_Entry> _level(List<_Cmd> cmds) => [
+    for (final (label, index) in menuLevel([for (final c in cmds) c.label], _path))
+      _Entry(label, index == null ? null : cmds[index]),
+  ];
+
+  void _up() => setState(() => _path.removeLast());
+
   @override
   Widget build(BuildContext context) {
     final q = _q.text.toLowerCase();
-    final hits = _commands.where((c) => c.label.toLowerCase().contains(q)).toList();
+    final cmds = _commands;
+    // En sökning letar i hela trädet och visar hela vägen; annars visas nivån man står på.
+    final entries = q.isEmpty
+        ? _level(cmds)
+        : [
+            for (final c in cmds)
+              if (c.label.toLowerCase().contains(q)) _Entry(c.segments.join(' / '), c),
+          ];
+    final hits = [
+      for (final e in entries)
+        if (e.cmd != null) e.cmd!,
+    ];
 
-    return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: _reload,
-                  child: _RunList(runs: _runs),
-                ),
-              ),
-              if (_status != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(_status!, style: const TextStyle(color: muted, fontSize: 15)),
-                ),
-              for (final c in hits)
-                InkWell(
-                  onTap: () => _runCmd(c),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 48),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(c.label, style: TextStyle(color: q.isNotEmpty && c == hits.first ? accent : fg)),
-                    ),
+    return PopScope(
+      // Tillbakagesten tömmer först sökningen, sedan går den upp en menynivå.
+      canPop: q.isEmpty && _path.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (q.isNotEmpty) {
+          _q.clear();
+        } else {
+          _up();
+        }
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _reload,
+                    child: _RunList(runs: _runs),
                   ),
                 ),
-              if (hits.isEmpty) const Text('inget som matchar', style: TextStyle(color: muted)),
-              const SizedBox(height: 12),
-              Container(
-                decoration: const BoxDecoration(
-                  border: Border(top: BorderSide(color: line)),
-                ),
-                constraints: const BoxConstraints(minHeight: 52),
-                child: Row(
-                  children: [
-                    const Text('> ', style: TextStyle(color: accent, fontSize: 20)),
-                    Expanded(
-                      child: TextField(
-                        controller: _q,
-                        cursorColor: accent,
-                        cursorWidth: 10,
-                        style: const TextStyle(fontSize: 20, color: fg),
-                        decoration: const InputDecoration(border: InputBorder.none, isDense: true),
-                        onSubmitted: (_) {
-                          if (hits.isNotEmpty) _runCmd(hits.first);
-                        },
+                if (_status != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(_status!, style: const TextStyle(color: muted, fontSize: 15)),
+                  ),
+                if (_path.isNotEmpty && q.isEmpty)
+                  InkWell(
+                    onTap: _up,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 48),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('‹ ${_path.join(' / ')}', style: const TextStyle(color: muted)),
                       ),
                     ),
-                  ],
+                  ),
+                for (final e in entries)
+                  InkWell(
+                    onTap: () => e.cmd == null ? setState(() => _path.add(e.label)) : _runCmd(e.cmd!),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 48),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text.rich(
+                          TextSpan(
+                            text: e.label,
+                            style: TextStyle(color: q.isNotEmpty && e.cmd == hits.firstOrNull ? accent : fg),
+                            children: [
+                              if (e.cmd == null)
+                                const TextSpan(
+                                  text: ' +',
+                                  style: TextStyle(color: muted),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (entries.isEmpty) const Text('inget som matchar', style: TextStyle(color: muted)),
+                const SizedBox(height: 12),
+                Container(
+                  decoration: const BoxDecoration(
+                    border: Border(top: BorderSide(color: line)),
+                  ),
+                  constraints: const BoxConstraints(minHeight: 52),
+                  child: Row(
+                    children: [
+                      const Text('> ', style: TextStyle(color: accent, fontSize: 20)),
+                      Expanded(
+                        child: TextField(
+                          controller: _q,
+                          cursorColor: accent,
+                          cursorWidth: 10,
+                          style: const TextStyle(fontSize: 20, color: fg),
+                          decoration: const InputDecoration(border: InputBorder.none, isDense: true),
+                          onSubmitted: (_) {
+                            if (hits.isNotEmpty) _runCmd(hits.first);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

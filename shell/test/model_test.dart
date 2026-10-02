@@ -1,3 +1,4 @@
+import 'package:alt/main.dart';
 import 'package:alt/records.dart';
 import 'package:alt/workspace.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -120,5 +121,18 @@ fields:
     expect(c.label, 'Jobbkalender');
     expect(c.fields.map((f) => f.label), ['Datum', 'Title', 'Projekt']);
     expect(c.fields.map((f) => f.name), ['date', 'title', 'project']);
+  });
+
+  test('menyn visar en nivå i taget, med undermenyer', () {
+    final labels = [
+      'Datum / 14 dagar',
+      'Minnesbank / Privat kalender',
+      'Minnesbank / Jobbkalender',
+      'Spike / Hej',
+      'Ensam',
+    ];
+    expect(menuLevel(labels, []), [('Datum', null), ('Minnesbank', null), ('Spike', null), ('Ensam', 4)]);
+    expect(menuLevel(labels, ['Minnesbank']), [('Privat kalender', 1), ('Jobbkalender', 2)]);
+    expect(menuLevel(labels, ['Okänd']), isEmpty);
   });
 }

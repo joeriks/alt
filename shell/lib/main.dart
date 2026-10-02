@@ -138,8 +138,21 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     'Claude-nyckel',
     'En API-nyckel från console.anthropic.com. Sparas krypterad på telefonen.',
     setClaudeKey,
-    'nyckeln sparad, prova Utveckla / Fråga AI',
+    'nyckeln sparad, Fråga AI använder nu Claude',
   );
+
+  Future<void> _askOpenAiKey() => _askSecret(
+    'OpenAI-nyckel',
+    'En API-nyckel från platform.openai.com. Sparas krypterad på telefonen.',
+    setOpenAiKey,
+    'nyckeln sparad, Fråga AI använder nu OpenAI',
+  );
+
+  Future<void> _switchAi() async {
+    final next = (await aiService()) == AiService.claude ? AiService.openai : AiService.claude;
+    await setAiService(next);
+    _say('Fråga AI använder nu ${next.label} (${next.modelName})');
+  }
 
   Future<void> _askSecret(String title, String help, Future<void> Function(String) save, String done) async {
     final ctl = TextEditingController();
@@ -207,7 +220,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       }
     }),
     _Cmd('System / GitHub-nyckel', _askToken),
-    _Cmd('System / Claude-nyckel', _askClaudeKey),
+    _Cmd('System / AI / Claude-nyckel', _askClaudeKey),
+    _Cmd('System / AI / OpenAI-nyckel', _askOpenAiKey),
+    _Cmd('System / AI / Byt AI-tjänst', _switchAi),
     _Cmd('Utveckla / Filer', () => _push(const DevFilesScreen())),
     _Cmd('Utveckla / Fråga AI', () => _push(const AiScreen())),
     _Cmd('System / Schema / Starta', () async {

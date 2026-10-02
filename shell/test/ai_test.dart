@@ -58,9 +58,55 @@ void main() {
   });
 
   test('kostnaden räknas i öre', () {
-    // 2000 in och 600 ut: (2000 * 1 + 600 * 5) / 1e6 USD = 0,005 USD = 5 öre
-    expect(costOre({'input_tokens': 2000, 'output_tokens': 600}), closeTo(5, 0.001));
-    expect(costOre(null), isNull);
+    // Haiku, 2000 in och 600 ut: (2000 * 1 + 600 * 5) / 1e6 USD = 0,005 USD = 5 öre
+    expect(costOre('claude-haiku-4-5', 2000, 600), closeTo(5, 0.001));
+    expect(costOre('okänd', 2000, 600), isNull);
+  });
+
+  test('OpenAI: förfrågan och svar', () {
+    final r = buildOpenAiRequest('lägg till böcker', {'lang/sv.yaml': 'apps: {}'});
+    expect(r['response_format']['json_schema']['strict'], true);
+    expect(r['messages'][1]['content'], contains('lägg till böcker'));
+    final p = parseOpenAiResponse({
+      'choices': [
+        {
+          'finish_reason': 'stop',
+          'message': {
+            'content': jsonEncode({
+              'summary': 'ok',
+              'files': [
+                {'path': 'lang/sv.yaml', 'content': 'x'},
+              ],
+            }),
+          },
+        },
+      ],
+      'usage': {'prompt_tokens': 2000, 'completion_tokens': 800},
+    });
+    expect(p.files.single.path, 'lang/sv.yaml');
+    expect(p.ore, closeTo(1.4, 0.001));
+    expect(
+      () => parseOpenAiResponse({
+        'choices': [
+          {
+            'finish_reason': 'stop',
+            'message': {'content': null, 'refusal': 'nej'},
+          },
+        ],
+      }),
+      throwsA(isA<AiException>()),
+    );
+    expect(
+      () => parseOpenAiResponse({
+        'choices': [
+          {
+            'finish_reason': 'length',
+            'message': {'content': '{'},
+          },
+        ],
+      }),
+      throwsA(isA<AiException>()),
+    );
   });
 
   test('raddiff', () {

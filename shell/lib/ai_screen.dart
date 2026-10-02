@@ -8,7 +8,7 @@ import 'workspace.dart';
 const _code = TextStyle(fontFamily: 'monospace', fontSize: 14, height: 1.45, color: fg);
 const _green = Color(0xFF9CC57A);
 
-/// Fråga AI: beskriv en ändring, se Claudes förslag som diff, spara som utkast.
+/// Fråga AI: beskriv en ändring, se AI:ns förslag som diff, spara som utkast.
 class AiScreen extends StatefulWidget {
   const AiScreen({super.key, this.ask = '', this.proposal});
   final String ask;
@@ -23,6 +23,7 @@ class AiScreen extends StatefulWidget {
 class _AiScreenState extends State<AiScreen> {
   late final _ctl = TextEditingController(text: widget.ask);
   Map<String, String> _files = {};
+  AiService _service = AiService.claude;
 
   /// Filerna som förslaget bygger på, så att diffen står kvar efter att utkasten sparats.
   Map<String, String> _base = {};
@@ -46,9 +47,11 @@ class _AiScreenState extends State<AiScreen> {
 
   Future<void> _load() async {
     final files = await filesForAi(await allDrafts());
+    final service = await aiService();
     if (mounted) {
       setState(() {
         _files = files;
+        _service = service;
         if (_proposal == null || _base.isEmpty) _base = files;
       });
     }
@@ -66,12 +69,12 @@ class _AiScreenState extends State<AiScreen> {
       _error = null;
     });
     try {
-      final p = await askClaude(ask, _files);
+      final p = await askAi(ask, _files);
       if (!mounted) return;
       setState(() {
         _base = _files;
         _proposal = p;
-        _error = p.files.isEmpty ? 'Claude föreslog inga ändringar. ${p.summary}'.trim() : null;
+        _error = p.files.isEmpty ? 'AI:n föreslog inga ändringar. ${p.summary}'.trim() : null;
         if (p.files.isEmpty) _proposal = null;
       });
     } on AiException catch (e) {
@@ -161,7 +164,7 @@ class _AiScreenState extends State<AiScreen> {
     return ListView(
       children: [
         Text(
-          'Skickar ${_files.length} filer från ${defaultRepo.split('/').last} till Claude. '
+          'Skickar ${_files.length} filer från ${defaultRepo.split('/').last} till ${_service.label} (${_service.modelName}). '
           'Dina poster skickas aldrig.',
           style: const TextStyle(color: muted, fontSize: 15),
         ),
@@ -186,7 +189,7 @@ class _AiScreenState extends State<AiScreen> {
           const SizedBox(height: 20),
           const LinearProgressIndicator(color: accent, backgroundColor: line),
           const SizedBox(height: 8),
-          const Text('Claude skriver…', style: TextStyle(color: muted, fontSize: 15)),
+          Text('${_service.label} skriver…', style: const TextStyle(color: muted, fontSize: 15)),
         ],
         if (_error != null)
           Padding(

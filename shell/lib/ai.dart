@@ -5,7 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'workspace.dart';
 
-/// AI-styrning: du beskriver en ändring med egna ord, Claude skriver om filerna
+/// AI-styrning: du beskriver en ändring med egna ord, AI:n (Claude eller OpenAI) skriver om filerna
 /// i receptrepot, och resultatet blir utkast som du provar innan något sparas.
 ///
 /// Det enda som skickas är filerna från receptrepot (apps/, types/, lang/) och
@@ -13,14 +13,38 @@ import 'workspace.dart';
 
 const _secure = FlutterSecureStorage();
 
-/// Haiku är billigast: en vanlig ändring kostar några öre.
+/// Billiga modeller: en vanlig ändring kostar några öre.
 const model = 'claude-haiku-4-5';
+const openAiModel = 'gpt-5.4-nano';
 
 /// Pris i USD per miljon token (in, ut) och en ungefärlig växelkurs, för att visa kostnaden.
-const _usdPerMTokIn = 1.0, _usdPerMTokOut = 5.0, _sekPerUsd = 10.0;
+const _prices = {model: (1.0, 5.0), openAiModel: (0.20, 1.25)};
+const _sekPerUsd = 10.0;
+
+enum AiService { claude, openai }
+
+extension AiServiceName on AiService {
+  String get label => this == AiService.claude ? 'Claude' : 'OpenAI';
+  String get modelName => this == AiService.claude ? model : openAiModel;
+}
 
 Future<String?> claudeKey() => _secure.read(key: 'anthropic_key');
-Future<void> setClaudeKey(String key) => _secure.write(key: 'anthropic_key', value: key.trim());
+Future<String?> openAiKey() => _secure.read(key: 'openai_key');
+
+/// Att lägga in en nyckel väljer också den tjänsten.
+Future<void> setClaudeKey(String key) async {
+  await _secure.write(key: 'anthropic_key', value: key.trim());
+  await setAiService(AiService.claude);
+}
+
+Future<void> setOpenAiKey(String key) async {
+  await _secure.write(key: 'openai_key', value: key.trim());
+  await setAiService(AiService.openai);
+}
+
+Future<AiService> aiService() async =>
+    (await _secure.read(key: 'ai_service')) == 'openai' ? AiService.openai : AiService.claude;
+Future<void> setAiService(AiService s) => _secure.write(key: 'ai_service', value: s.name);
 
 const aiRules = '''
 Du ändrar filerna i en persons receptrepo för appen alt, en Android-app där användaren bygger egna små appar utan att bygga om appen.
@@ -60,12 +84,11 @@ class AiProposal {
   final double? ore;
 }
 
-/// Kostnad i öre för ett anrop, från svarets usage.
-double? costOre(Map<String, dynamic>? usage) {
-  if (usage == null) return null;
-  final input = (usage['input_tokens'] as num? ?? 0) + (usage['cache_creation_input_tokens'] as num? ?? 0);
-  final output = usage['output_tokens'] as num? ?? 0;
-  return (input * _usdPerMTokIn + output * _usdPerMTokOut) / 1e6 * _sekPerUsd * 100;
+/// Kostnad i öre för ett anrop med [modelId], från antal token in och ut.
+double? costOre(String modelId, num? input, num? output) {
+  final price = _prices[modelId];
+  if (price == null || input == null || output == null) return null;
+  return (input * price.$1 + output * price.$2) / 1e6 * _sekPerUsd * 100;
 }
 
 class AiException implements Exception {
@@ -96,37 +119,46 @@ const _schema = {
   'additionalProperties': false,
 };
 
-/// Bygger förfrågan till Claude. [files] är relativ sökväg → innehåll.
-Map<String, dynamic> buildRequest(String ask, Map<String, String> files) {
+String _userMessage(String ask, Map<String, String> files) {
   final listing = StringBuffer();
   for (final e in (files.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))) {
     listing.writeln('<file path="${e.key}">\n${e.value}\n</file>');
   }
-  return {
-    'model': model,
-    'max_tokens': 8000,
-    'output_config': {
-      'format': {'type': 'json_schema', 'schema': _schema},
-    },
-    'system': aiRules,
-    'messages': [
-      {'role': 'user', 'content': 'Receptrepots filer just nu:\n\n$listing\nÄndring jag vill ha:\n$ask'},
-    ],
-  };
+  return 'Receptrepots filer just nu:\n\n$listing\nÄndring jag vill ha:\n$ask';
 }
+
+/// Bygger förfrågan till Claude. [files] är relativ sökväg → innehåll.
+Map<String, dynamic> buildRequest(String ask, Map<String, String> files) => {
+  'model': model,
+  'max_tokens': 8000,
+  'output_config': {
+    'format': {'type': 'json_schema', 'schema': _schema},
+  },
+  'system': aiRules,
+  'messages': [
+    {'role': 'user', 'content': _userMessage(ask, files)},
+  ],
+};
+
+/// Bygger förfrågan till OpenAI (Chat Completions med JSON-schema).
+Map<String, dynamic> buildOpenAiRequest(String ask, Map<String, String> files) => {
+  'model': openAiModel,
+  'max_completion_tokens': 8000,
+  'reasoning_effort': 'low',
+  'response_format': {
+    'type': 'json_schema',
+    'json_schema': {'name': 'proposal', 'strict': true, 'schema': _schema},
+  },
+  'messages': [
+    {'role': 'system', 'content': aiRules},
+    {'role': 'user', 'content': _userMessage(ask, files)},
+  ],
+};
 
 final _pathRule = RegExp(r'^(apps/[a-zåäö][a-zåäö0-9_]*/[a-zåäö0-9_.]+|types/[a-z0-9_.]+|lang/[a-z]{2}\.yaml)$');
 
-/// Tolkar svaret. Kastar AiException om Claude avböjde, svaret blev avkortat
-/// eller innehåller filer utanför apps/, types/ och lang/.
-AiProposal parseResponse(Map<String, dynamic> res) {
-  final stop = res['stop_reason'];
-  if (stop == 'refusal') throw AiException('Claude avböjde förfrågan.');
-  if (stop == 'max_tokens') throw AiException('Svaret blev för långt och avbröts. Försök med en mindre ändring.');
-  final text = [
-    for (final b in (res['content'] as List? ?? const []))
-      if (b is Map && b['type'] == 'text') b['text'] as String,
-  ].join();
+/// Tolkar förslaget. Kastar AiException för filer utanför apps/, types/ och lang/.
+AiProposal _proposal(String text, double? ore) {
   final Map<String, dynamic> data;
   try {
     data = jsonDecode(text) as Map<String, dynamic>;
@@ -137,41 +169,87 @@ AiProposal parseResponse(Map<String, dynamic> res) {
   for (final f in (data['files'] as List? ?? const [])) {
     final path = (f['path'] as String).trim();
     if (!_pathRule.hasMatch(path) || path.contains('..')) {
-      throw AiException('Claude föreslog en fil utanför receptrepots mappar: $path');
+      throw AiException('AI:n föreslog en fil utanför receptrepots mappar: $path');
     }
     files.add(AiFile(path, f['content'] as String));
   }
-  return AiProposal((data['summary'] ?? '').toString(), files, ore: costOre(res['usage'] as Map<String, dynamic>?));
+  return AiProposal((data['summary'] ?? '').toString(), files, ore: ore);
 }
 
-/// Skickar ändringen till Claude och returnerar förslaget.
-Future<AiProposal> askClaude(String ask, Map<String, String> files) async {
-  final key = await claudeKey();
-  if (key == null || key.isEmpty) throw AiException('Ingen Claude-nyckel. Lägg in den under System / Claude-nyckel.');
+const _tooLong = 'Svaret blev för långt och avbröts. Försök med en mindre ändring.';
+
+/// Tolkar Claudes svar. Kastar AiException om Claude avböjde eller svaret blev avkortat.
+AiProposal parseResponse(Map<String, dynamic> res) {
+  final stop = res['stop_reason'];
+  if (stop == 'refusal') throw AiException('Claude avböjde förfrågan.');
+  if (stop == 'max_tokens') throw AiException(_tooLong);
+  final text = [
+    for (final b in (res['content'] as List? ?? const []))
+      if (b is Map && b['type'] == 'text') b['text'] as String,
+  ].join();
+  final usage = res['usage'] as Map<String, dynamic>?;
+  final input = usage == null
+      ? null
+      : (usage['input_tokens'] as num? ?? 0) + (usage['cache_creation_input_tokens'] as num? ?? 0);
+  return _proposal(text, costOre(model, input, usage?['output_tokens'] as num?));
+}
+
+/// Tolkar OpenAIs svar.
+AiProposal parseOpenAiResponse(Map<String, dynamic> res) {
+  final choice = ((res['choices'] as List?) ?? const []).firstOrNull as Map?;
+  if (choice == null) throw AiException('Svaret gick inte att läsa.');
+  final message = choice['message'] as Map? ?? const {};
+  if (message['refusal'] != null) throw AiException('OpenAI avböjde förfrågan: ${message['refusal']}');
+  if (choice['finish_reason'] == 'length') throw AiException(_tooLong);
+  final usage = res['usage'] as Map<String, dynamic>?;
+  return _proposal(
+    (message['content'] ?? '').toString(),
+    costOre(openAiModel, usage?['prompt_tokens'] as num?, usage?['completion_tokens'] as num?),
+  );
+}
+
+/// Skickar ändringen till den valda AI-tjänsten och returnerar förslaget.
+Future<AiProposal> askAi(String ask, Map<String, String> files) async {
+  final service = await aiService();
+  final key = service == AiService.claude ? await claudeKey() : await openAiKey();
+  final name = service.label;
+  if (key == null || key.isEmpty) {
+    throw AiException('Ingen $name-nyckel. Lägg in den under System / AI / $name-nyckel.');
+  }
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
   try {
-    final req = await client.postUrl(Uri.parse('https://api.anthropic.com/v1/messages'));
+    final HttpClientRequest req;
+    if (service == AiService.claude) {
+      req = await client.postUrl(Uri.parse('https://api.anthropic.com/v1/messages'));
+      req.headers.set('x-api-key', key);
+      req.headers.set('anthropic-version', '2023-06-01');
+    } else {
+      req = await client.postUrl(Uri.parse('https://api.openai.com/v1/chat/completions'));
+      req.headers.set('Authorization', 'Bearer $key');
+    }
     req.headers.contentType = ContentType.json;
-    req.headers.set('x-api-key', key);
-    req.headers.set('anthropic-version', '2023-06-01');
-    req.add(utf8.encode(jsonEncode(buildRequest(ask, files))));
+    final body = service == AiService.claude ? buildRequest(ask, files) : buildOpenAiRequest(ask, files);
+    req.add(utf8.encode(jsonEncode(body)));
     final res = await req.close().timeout(const Duration(minutes: 5));
-    final body = await res.transform(utf8.decoder).join();
-    if (res.statusCode == 401) throw AiException('Claude-nyckeln godtogs inte.');
-    if (res.statusCode == 429) throw AiException('För många förfrågningar just nu. Vänta en stund och försök igen.');
-    if (res.statusCode >= 500) {
-      throw AiException('Claude svarar inte just nu (${res.statusCode}). Försök igen om en stund.');
-    }
-    if (res.statusCode != 200) {
-      var msg = body;
+    final text = await res.transform(utf8.decoder).join();
+    String apiMessage() {
       try {
-        msg = (jsonDecode(body) as Map)['error']['message'].toString();
-      } catch (_) {}
-      throw AiException('Fel ${res.statusCode}: $msg');
+        return (jsonDecode(text) as Map)['error']['message'].toString();
+      } catch (_) {
+        return text;
+      }
     }
-    return parseResponse(jsonDecode(body) as Map<String, dynamic>);
+
+    if (res.statusCode == 401) throw AiException('$name-nyckeln godtogs inte.');
+    if (res.statusCode == 429) throw AiException('$name säger nej just nu: ${apiMessage()}');
+    if (res.statusCode >= 500) {
+      throw AiException('$name svarar inte just nu (${res.statusCode}). Försök igen om en stund.');
+    }
+    if (res.statusCode != 200) throw AiException('Fel ${res.statusCode} från $name: ${apiMessage()}');
+    final json = jsonDecode(text) as Map<String, dynamic>;
+    return service == AiService.claude ? parseResponse(json) : parseOpenAiResponse(json);
   } on SocketException {
-    throw AiException('Ingen kontakt med Claude. Är du ansluten till internet?');
+    throw AiException('Ingen kontakt med $name. Är du ansluten till internet?');
   } finally {
     client.close();
   }

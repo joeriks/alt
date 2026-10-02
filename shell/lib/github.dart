@@ -45,9 +45,13 @@ class _GitHub {
     final text = await res.transform(utf8.decoder).join();
     if (res.statusCode == 401) throw PublishException('GitHub-nyckeln godtogs inte.');
     if (res.statusCode == 403 || (res.statusCode == 404 && method != 'GET')) {
+      var detail = '';
+      try {
+        detail = '\n\nGitHub: ${(jsonDecode(text) as Map)['message']}';
+      } catch (_) {}
       throw PublishException(
         'Nyckeln får inte skriva till ${repo.split('/').last}. '
-        'Ge den "Contents: Read and write" på GitHub och lägg in den igen under System / GitHub-nyckel.',
+        'Ge den "Contents: Read and write" på GitHub och lägg in den igen under System / GitHub-nyckel.$detail',
       );
     }
     if (res.statusCode == 409 || res.statusCode == 422) {

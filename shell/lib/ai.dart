@@ -48,7 +48,7 @@ Future<void> setAiService(AiService s) => _secure.write(key: 'ai_service', value
 
 const aiRules = '''
 Du ändrar filerna i en persons receptrepo för appen alt, en Android-app där användaren bygger egna små appar utan att bygga om appen.
-Svara med de filer som ska ändras eller skapas, med HELA det nya innehållet i varje fil, och en kort sammanfattning på svenska av vad du ändrade.
+Svara med de filer som ska ändras eller skapas, med HELA det nya innehållet i varje fil. Skriv alltid en kort sammanfattning på svenska av vad du ändrade i summary, en eller två meningar.
 Ändra bara det som behövs för att göra det användaren ber om. Rör inte andra filer.
 
 Filer och format:

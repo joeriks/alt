@@ -203,7 +203,7 @@ class _AiScreenState extends State<AiScreen> {
   Widget _proposalView(AiProposal p) {
     return ListView(
       children: [
-        Text(p.summary),
+        Text(p.summary.trim().isEmpty ? 'Förslag på ändringar i ${p.files.length} filer.' : p.summary),
         if (p.ore != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),

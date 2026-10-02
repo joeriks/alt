@@ -22,9 +22,14 @@ Future<String> recipesRepo() async => (await _secure.read(key: 'recipes_repo')) 
 /// Ett fält i en samling. Skrivs i YAML som `datum: { date, required }`
 /// eller `vem: { link: person }`.
 class Field {
-  Field({required this.name, required this.type, this.required = false, this.link});
+  Field({required this.name, required this.type, this.required = false, this.link, String? label})
+    : label = label ?? name.replaceAll('_', ' ');
 
+  /// Tekniskt namn, på engelska: `date`, `title`.
   final String name;
+
+  /// Det som visas, till exempel "Datum". Utan `label:` visas namnet.
+  final String label;
   final String type; // text, longtext, date, time, number, bool, link
   final bool required;
   final String? link;
@@ -35,11 +40,14 @@ class Field {
     var type = 'text';
     var req = false;
     String? link;
+    String? label;
     if (spec is Map) {
       for (final e in spec.entries) {
         final k = e.key.toString();
         if (k == 'required') {
           req = e.value == null || e.value == true;
+        } else if (k == 'label') {
+          label = e.value?.toString();
         } else if (k == 'link') {
           type = 'link';
           link = e.value?.toString();
@@ -50,10 +58,18 @@ class Field {
     } else if (spec is String && types.contains(spec)) {
       type = spec;
     }
-    return Field(name: name, type: type, required: req, link: link);
+    return Field(name: name, type: type, required: req, link: link, label: label);
   }
 
-  String get label => name.replaceAll('_', ' ');
+  Field withLabel(String l) => Field(name: name, type: type, required: required, link: link, label: l);
+}
+
+/// Språkfilen som matchar telefonens språk, till exempel `lang/sv.yaml`.
+Map<String, dynamic> loadLang(Directory root) {
+  final code = Platform.localeName.split(RegExp('[_-]')).first.toLowerCase();
+  final f = File('${root.path}/lang/$code.yaml');
+  if (!f.existsSync()) return const {};
+  return Map<String, dynamic>.from(jsonDecode(jsonEncode(loadYaml(f.readAsStringSync()) ?? {})) as Map);
 }
 
 class Collection {
@@ -83,25 +99,42 @@ class Collection {
   Field? get timeField => fields.where((f) => f.type == 'time').firstOrNull;
 
   /// [types] är de delade typerna från `types/*.type.yaml`. En samling med
-  /// `type: datumpost` får typens fält, roll och titel, och får lägga till egna
+  /// `type: dated_entry` får typens fält, roll och titel, och får lägga till egna
   /// fält men inte ändra typens.
+  ///
+  /// [lang] är språkfilen för telefonens språk (`lang/sv.yaml`). Den ersätter
+  /// de engelska etiketterna; det som saknas där visas på engelska.
   static Collection parse(
     String name,
     String app,
     String appLabel,
     String source, {
     Map<String, Map<String, dynamic>> types = const {},
+    Map<String, dynamic> lang = const {},
   }) {
     final y = loadYaml(source);
     final m = jsonDecode(jsonEncode(y)) as Map<String, dynamic>;
     final typeName = m['type']?.toString();
     final type = typeName == null ? null : types[typeName];
     if (typeName != null && type == null) throw FormatException('$name: typen $typeName finns inte');
+    String? tr(List<String> path) {
+      dynamic v = lang;
+      for (final k in path) {
+        if (v is! Map) return null;
+        v = v[k];
+      }
+      return v is String ? v : null;
+    }
+
     final fields = <Field>[];
     for (final src in [type?['fields'], m['fields']]) {
       if (src is! Map) continue;
       for (final e in src.entries) {
-        final f = Field.parse(e.key.toString(), e.value);
+        var f = Field.parse(e.key.toString(), e.value);
+        final override =
+            tr(['collections', name, 'fields', f.name]) ??
+            (typeName == null ? null : tr(['types', typeName, 'fields', f.name]));
+        if (override != null) f = f.withLabel(override);
         if (fields.any((x) => x.name == f.name)) {
           throw FormatException('$name: fältet ${f.name} finns redan i typen $typeName och får inte ändras');
         }
@@ -113,8 +146,8 @@ class Collection {
     return Collection(
       name: name,
       app: app,
-      appLabel: appLabel,
-      label: m['label']?.toString() ?? name,
+      appLabel: tr(['apps', app]) ?? appLabel,
+      label: tr(['collections', name, 'label']) ?? m['label']?.toString() ?? name,
       fields: fields,
       role: pick('role'),
       encrypted: m['encrypted'] != false,
@@ -140,6 +173,12 @@ class Workspace {
     final collections = <Collection>[];
     final recipes = <Recipe>[];
     final problems = <String>[];
+    var lang = const <String, dynamic>{};
+    try {
+      lang = loadLang(root);
+    } catch (e) {
+      problems.add('lang: $e');
+    }
     final types = <String, Map<String, dynamic>>{};
     final typeDir = Directory('${root.path}/types');
     if (typeDir.existsSync()) {
@@ -174,7 +213,7 @@ class Workspace {
           try {
             if (file.endsWith('.collection.yaml')) {
               final name = file.substring(0, file.length - '.collection.yaml'.length);
-              collections.add(Collection.parse(name, app, appLabel, f.readAsStringSync(), types: types));
+              collections.add(Collection.parse(name, app, appLabel, f.readAsStringSync(), types: types, lang: lang));
             } else if (file.endsWith('.recipe')) {
               recipes.add(Recipe.parse(f.readAsStringSync()));
             }
@@ -212,7 +251,7 @@ Future<int> syncWorkspace() async {
         jsonDecode(utf8.decode(await get('https://api.github.com/repos/$repo/git/trees/$branch?recursive=1'))) as Map;
     final paths = [
       for (final t in (tree['tree'] as List))
-        if (t['type'] == 'blob' && RegExp(r'^(apps|types)/').hasMatch(t['path'] as String)) t['path'] as String,
+        if (t['type'] == 'blob' && RegExp(r'^(apps|types|lang)/').hasMatch(t['path'] as String)) t['path'] as String,
     ];
     final root = await workspaceDir();
     final tmp = Directory('${root.path}.new');

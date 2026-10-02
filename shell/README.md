@@ -21,7 +21,9 @@ under `Inställningar / GitHub-nyckel` och sparas krypterad på telefonen.
 
 Varje `*.collection.yaml` blir ett menyval med lista, post, formulär, borttagning och Ångra.
 Samlingar med `role: timeline` syns också i `Datum / 14 dagar`. En typ i `types/<namn>.type.yaml`
-ger flera samlingar samma fält (`type: <namn>`); en samling får lägga till fält men inte ändra typens. Poster sparas som en fil per
+ger flera samlingar samma fält (`type: <namn>`); en samling får lägga till fält men inte ändra typens.
+Namn och etiketter skrivs på engelska; `lang/<språk>.yaml` i receptrepot ersätter etiketterna
+när telefonen har det språket. Poster sparas som en fil per
 post i appens mapp; synk mot datarepot kommer i nästa steg.
 
 ## Delar

@@ -71,4 +71,54 @@ fields:
     );
     expect(() => Collection.parse('x', 'a', 'A', 'type: saknas\n', types: types), throwsFormatException);
   });
+
+  test('fält har engelskt namn och svensk etikett', () {
+    final c = Collection.parse(
+      'x',
+      'a',
+      'A',
+      'fields:\n  date: { date, required, label: Datum }\n  note: { longtext }\n',
+    );
+    expect(c.fields.first.name, 'date');
+    expect(c.fields.first.label, 'Datum');
+    expect(c.fields.first.required, true);
+    expect(c.fields.last.label, 'note');
+  });
+
+  test('svensk språkfil ersätter engelska etiketter', () {
+    final types = {
+      'dated_entry': {
+        'fields': {
+          'date': {'date': null, 'label': 'Date'},
+          'title': {'text': null, 'label': 'Title'},
+        },
+      },
+    };
+    final lang = {
+      'apps': {'memory_bank': 'Minnesbank'},
+      'types': {
+        'dated_entry': {
+          'fields': {'date': 'Datum'},
+        },
+      },
+      'collections': {
+        'work_calendar': {
+          'label': 'Jobbkalender',
+          'fields': {'project': 'Projekt'},
+        },
+      },
+    };
+    final c = Collection.parse(
+      'work_calendar',
+      'memory_bank',
+      'Memory bank',
+      'type: dated_entry\nlabel: Work calendar\nfields:\n  project: { text, label: Project }\n',
+      types: types,
+      lang: lang,
+    );
+    expect(c.appLabel, 'Minnesbank');
+    expect(c.label, 'Jobbkalender');
+    expect(c.fields.map((f) => f.label), ['Datum', 'Title', 'Projekt']);
+    expect(c.fields.map((f) => f.name), ['date', 'title', 'project']);
+  });
 }

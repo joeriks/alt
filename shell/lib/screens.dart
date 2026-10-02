@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'query.dart';
 import 'records.dart';
 import 'ui.dart';
 import 'workspace.dart';
@@ -496,6 +497,86 @@ class _TimelineScreenState extends State<TimelineScreen> {
       child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(children: children),
+      ),
+    );
+  }
+}
+
+/// Poster från en fråga: titel, och datum och samling under.
+class QueryResults extends StatelessWidget {
+  const QueryResults({super.key, required this.items, required this.onChanged, this.showCollection = true});
+  final List<(Collection, Rec)> items;
+  final VoidCallback onChanged;
+  final bool showCollection;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const Text('inga poster matchar', style: TextStyle(color: muted));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (c, r) in items)
+          _Row(
+            title: r.str(c.titleField),
+            sub: [
+              if (_date(r, c) case final d?) dayLabel(d),
+              if (c.timeField != null) r.str(c.timeField!.name),
+              if (showCollection) c.label,
+            ].where((s) => s.isNotEmpty).join('  '),
+            onTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => RecordScreen(collection: c, rec: r),
+                ),
+              );
+              onChanged();
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class QueryScreen extends StatefulWidget {
+  const QueryScreen({super.key, required this.query, required this.collections});
+  final Query query;
+  final List<Collection> collections;
+
+  @override
+  State<QueryScreen> createState() => _QueryScreenState();
+}
+
+class _QueryScreenState extends State<QueryScreen> {
+  List<(Collection, Rec)>? _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final items = await runQuery(widget.query, widget.collections);
+    if (mounted) setState(() => _items = items);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AltPage(
+      back: 'Meny',
+      title: widget.query.label,
+      child: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          children: [
+            if (_items != null)
+              QueryResults(
+                items: _items!,
+                onChanged: _load,
+                showCollection: widget.query.sources(widget.collections).length > 1,
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -48,8 +48,13 @@ Future<void> setAiService(AiService s) => _secure.write(key: 'ai_service', value
 
 const aiRules = '''
 Du ändrar filerna i en persons receptrepo för appen alt, en Android-app där användaren bygger egna små appar utan att bygga om appen.
-Svara med de filer som ska ändras eller skapas, med HELA det nya innehållet i varje fil. Skriv alltid en kort sammanfattning på svenska av vad du ändrade i summary, en eller två meningar.
-Ändra bara det som behövs för att göra det användaren ber om. Rör inte andra filer.
+Användaren skriver antingen en ändring, en fråga om sina poster eller en fråga om appen.
+
+1. En ändring (t.ex. "lägg till en samling för böcker"): svara med de filer som ska ändras eller skapas, med HELA det nya innehållet i varje fil. Ändra bara det som behövs och rör inte andra filer. run är "".
+2. En fråga om användarens poster (t.ex. "vilka uppgifter har jag kvar?", "vad händer nästa vecka?"): du ser ALDRIG posterna, bara samlingarnas filer. Skriv en sparad fråga, apps/<app>/<namn>.query.yaml, som tar fram rätt poster. Lägg den i files och sätt run till dess sökväg; appen kör den på telefonen och visar listan. Lägg också till en svensk etikett för den i lang/sv.yaml under queries.
+3. En fråga om hur appen fungerar: svara i summary och lämna files tom. run är "".
+
+Skriv alltid summary på svenska, en eller två meningar: vad du ändrade, vad listan visar eller svaret på frågan.
 
 Filer och format:
 - apps/<app>/app.yaml: `label: <engelsk etikett>`.
@@ -61,6 +66,16 @@ Filer och format:
   - triggers är en lista: `- menu: Sökväg/Namn` (menyval), `- every: 15m` (även 2h, 1d).
   - ctx har: signal.trigger ('menu', 'every' eller 'prova'), signal.at (ISO-tid), store.get(nyckel) / store.set(nyckel, värde) för receptets egna sparade värden, out.show(titel, text) som visar en notis, och log(text).
   - JavaScript körs i QuickJS: inget nätverk, inga filer, ingen Intl. Skriv ES2020 utan moduler.
+
+- apps/<app>/<name>.query.yaml: en sparad fråga som visas som ett menyval. Nycklar:
+  - label: engelsk etikett.
+  - from: en samling, en lista av samlingar, eller `{ type: <typ> }` för alla samlingar av en typ.
+  - where (valfri): fält → villkor. Ett värde betyder lika med (`done: false` matchar också poster där bool-fältet saknas). Eller en karta med from/to (större/mindre eller lika, för datum, tid och tal), contains (text, oavsett skiftläge), empty (true/false) och not.
+  - Datum kan skrivas relativt: today, today+7d, today-1w, today+1m.
+  - sort (valfri): ett fält, med - först för omvänd ordning. Standard är samlingens datumfält.
+  - limit (valfri): högst så många poster.
+  - Exempel: `label: Open tasks`, `from: { type: dated_entry }`, `where: { done: false, date: { to: today+14d } }`, `sort: date`.
+  - lang/sv.yaml: `queries: { <namn>: { label: <etikett> } }`.
 
 Regler:
 - Tekniska namn (appar, samlingar, typer, fält, recept) skrivs på engelska med gemener a-z, siffror och understreck, och börjar med en bokstav. Till exempel private_calendar och dated_entry.
@@ -76,9 +91,12 @@ class AiFile {
 }
 
 class AiProposal {
-  AiProposal(this.summary, this.files, {this.ore});
+  AiProposal(this.summary, this.files, {this.ore, this.run = ''});
   final String summary;
   final List<AiFile> files;
+
+  /// Sökvägen till en fråga (.query.yaml) bland [files] som ska köras direkt, eller ''.
+  final String run;
 
   /// Ungefärlig kostnad i öre, om svaret talade om hur många token det blev.
   final double? ore;
@@ -102,6 +120,7 @@ const _schema = {
   'type': 'object',
   'properties': {
     'summary': {'type': 'string'},
+    'run': {'type': 'string'},
     'files': {
       'type': 'array',
       'items': {
@@ -115,7 +134,7 @@ const _schema = {
       },
     },
   },
-  'required': ['summary', 'files'],
+  'required': ['summary', 'run', 'files'],
   'additionalProperties': false,
 };
 
@@ -173,7 +192,11 @@ AiProposal _proposal(String text, double? ore) {
     }
     files.add(AiFile(path, f['content'] as String));
   }
-  return AiProposal((data['summary'] ?? '').toString(), files, ore: ore);
+  final run = (data['run'] ?? '').toString().trim();
+  if (run.isNotEmpty && !files.any((f) => f.path == run)) {
+    throw AiException('AI:n bad om att köra $run, men skickade inte med den filen.');
+  }
+  return AiProposal((data['summary'] ?? '').toString(), files, ore: ore, run: run);
 }
 
 const _tooLong = 'Svaret blev för långt och avbröts. Försök med en mindre ändring.';

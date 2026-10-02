@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'ai.dart';
 import 'dev.dart';
+import 'query.dart';
+import 'records.dart';
+import 'screens.dart';
 import 'ui.dart';
 import 'workspace.dart';
 
@@ -10,8 +13,11 @@ const _green = Color(0xFF9CC57A);
 
 /// Fråga AI: beskriv en ändring, se AI:ns förslag som diff, spara som utkast.
 class AiScreen extends StatefulWidget {
-  const AiScreen({super.key, this.ask = '', this.proposal});
+  const AiScreen({super.key, this.ask = '', this.send = false, this.proposal});
   final String ask;
+
+  /// Skicka [ask] direkt när vyn öppnas.
+  final bool send;
 
   /// Ett färdigt förslag, för skärmbilder och tester.
   final AiProposal? proposal;
@@ -33,10 +39,17 @@ class _AiScreenState extends State<AiScreen> {
   bool _saved = false;
   bool _published = false;
 
+  /// Posterna som en fråga från AI:n gav, räknade på telefonen.
+  List<(Collection, Rec)>? _results;
+  bool _manySources = false;
+
   @override
   void initState() {
     super.initState();
-    _load();
+    _load().then((_) {
+      if (widget.proposal != null) _runQuery(widget.proposal!);
+      if (widget.send && widget.ask.trim().isNotEmpty) _send();
+    });
   }
 
   @override
@@ -60,7 +73,7 @@ class _AiScreenState extends State<AiScreen> {
   Future<void> _send() async {
     final ask = _ctl.text.trim();
     if (ask.isEmpty) {
-      setState(() => _error = 'Skriv vad du vill ändra först.');
+      setState(() => _error = 'Skriv en fråga eller en ändring först.');
       return;
     }
     FocusScope.of(context).unfocus();
@@ -74,9 +87,8 @@ class _AiScreenState extends State<AiScreen> {
       setState(() {
         _base = _files;
         _proposal = p;
-        _error = p.files.isEmpty ? 'AI:n föreslog inga ändringar. ${p.summary}'.trim() : null;
-        if (p.files.isEmpty) _proposal = null;
       });
+      await _runQuery(p);
     } on AiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (e) {
@@ -85,6 +97,34 @@ class _AiScreenState extends State<AiScreen> {
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  /// Kör frågan som AI:n skrev, mot posterna på telefonen. Inget skickas någonstans.
+  Future<void> _runQuery(AiProposal p) async {
+    if (p.run.isEmpty) return;
+    final ws = Workspace.fromFiles({..._base, for (final f in p.files) f.path: f.content});
+    final q = ws.queries.where((q) => 'apps/${q.app}/${q.name}.query.yaml' == p.run).firstOrNull;
+    if (q == null) {
+      final why = ws.problems.where((x) => x.contains(p.run.split('/').last)).join('\n');
+      if (mounted) setState(() => _error = 'Frågan gick inte att köra. $why'.trim());
+      return;
+    }
+    final results = await runQuery(q, ws.collections);
+    if (mounted) {
+      setState(() {
+        _results = results;
+        _manySources = q.sources(ws.collections).length > 1;
+      });
+    }
+  }
+
+  void _reset() => setState(() {
+    _proposal = null;
+    _results = null;
+    _saved = false;
+    _published = false;
+    _error = null;
+    _ctl.clear();
+  });
 
   Future<void> _save() async {
     final p = _proposal!;
@@ -114,16 +154,8 @@ class _AiScreenState extends State<AiScreen> {
           ? null
           : p == null
           ? PrimaryButton('Skicka', onTap: _send)
-          : _published
-          ? PrimaryButton(
-              'Nytt förslag',
-              onTap: () => setState(() {
-                _proposal = null;
-                _saved = false;
-                _published = false;
-                _ctl.clear();
-              }),
-            )
+          : _published || p.files.isEmpty
+          ? PrimaryButton('Ny fråga', onTap: _reset)
           : _saved
           ? PrimaryButton(
               'Spara till GitHub',
@@ -135,7 +167,21 @@ class _AiScreenState extends State<AiScreen> {
             )
           : Row(
               children: [
-                Expanded(child: PrimaryButton('Spara utkast', onTap: _save)),
+                Expanded(
+                  child: PrimaryButton(
+                    p.run.isEmpty ? 'Spara utkast' : 'Spara i menyn',
+                    onTap: p.run.isEmpty
+                        ? _save
+                        : () async {
+                            // En fråga sparas direkt till GitHub, så att den syns i menyn.
+                            await _save();
+                            if (!context.mounted) return;
+                            if (await publishDrafts(context, [for (final f in p.files) f.path])) {
+                              setState(() => _published = true);
+                            }
+                          },
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Padding(
@@ -143,7 +189,10 @@ class _AiScreenState extends State<AiScreen> {
                     child: SizedBox(
                       height: 56,
                       child: OutlinedButton(
-                        onPressed: () => setState(() => _proposal = null),
+                        onPressed: () => setState(() {
+                          _proposal = null;
+                          _results = null;
+                        }),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: accent,
                           side: const BorderSide(color: accent),
@@ -178,7 +227,7 @@ class _AiScreenState extends State<AiScreen> {
           cursorColor: accent,
           textCapitalization: TextCapitalization.sentences,
           decoration: const InputDecoration(
-            hintText: 'Till exempel: lägg till en samling för böcker jag har läst, med betyg',
+            hintText: 'Till exempel: vilka uppgifter har jag kvar? eller: lägg till en samling för böcker jag har läst',
             hintStyle: TextStyle(color: muted, fontSize: 16),
             border: OutlineInputBorder(borderSide: BorderSide(color: line)),
             enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: line)),
@@ -203,7 +252,13 @@ class _AiScreenState extends State<AiScreen> {
   Widget _proposalView(AiProposal p) {
     return ListView(
       children: [
-        Text(p.summary.trim().isEmpty ? 'Förslag på ändringar i ${p.files.length} filer.' : p.summary),
+        Text(
+          p.summary.trim().isNotEmpty
+              ? p.summary
+              : p.files.isEmpty
+              ? 'AI:n hade inget svar.'
+              : 'Förslag på ändringar i ${p.files.length} filer.',
+        ),
         if (p.ore != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
@@ -221,6 +276,23 @@ class _AiScreenState extends State<AiScreen> {
                   : 'Sparat som utkast. Tryck på en fil för att prova den, och spara sedan till GitHub.',
               style: const TextStyle(color: accent, fontSize: 15),
             ),
+          ),
+        if (_results != null) ...[
+          const SizedBox(height: 16),
+          QueryResults(items: _results!, onChanged: () => _runQuery(p), showCollection: _manySources),
+          if (!_saved)
+            const Padding(
+              padding: EdgeInsets.only(top: 24),
+              child: Text(
+                'Vill du kunna köra listan igen? Spara frågan i menyn:',
+                style: TextStyle(color: muted, fontSize: 15),
+              ),
+            ),
+        ],
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Text(_error!, style: const TextStyle(color: red)),
           ),
         for (final f in p.files) ...[
           const SizedBox(height: 20),

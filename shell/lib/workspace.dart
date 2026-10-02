@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:yaml/yaml.dart';
 
 import 'engine.dart';
+import 'query.dart';
 
 /// Arbetsytan: appar, samlingar och recept som hämtas från receptrepot på GitHub.
 /// Den lokala kopian ligger i `workspace/` och byts bara ut när en hämtning lyckats helt.
@@ -158,10 +159,11 @@ class Collection {
 }
 
 class Workspace {
-  Workspace(this.collections, this.recipes, this.problems);
+  Workspace(this.collections, this.recipes, this.problems, {this.queries = const []});
 
   final List<Collection> collections;
   final List<Recipe> recipes;
+  final List<Query> queries;
 
   /// Filer som inte gick att läsa, så att ett trasigt recept inte stoppar resten.
   final List<String> problems;
@@ -186,6 +188,7 @@ class Workspace {
     final paths = files.keys.toList()..sort();
     final collections = <Collection>[];
     final recipes = <Recipe>[];
+    final queries = <Query>[];
     final problems = <String>[];
     var lang = const <String, dynamic>{};
     try {
@@ -227,12 +230,22 @@ class Workspace {
           collections.add(Collection.parse(name, app, appLabels[app]!, files[p]!, types: types, lang: lang));
         } else if (file.endsWith('.recipe')) {
           recipes.add(Recipe.parse(files[p]!));
+        } else if (file.endsWith('.query.yaml')) {
+          final name = file.substring(0, file.length - '.query.yaml'.length);
+          queries.add(Query.parse(name, app, appLabels[app]!, files[p]!, lang: lang));
         }
       } catch (e) {
         problems.add('$app/$file: $e');
       }
     }
-    return Workspace(collections, recipes, problems);
+    for (final q in queries) {
+      final missing = [
+        for (final f in q.from)
+          if (!collections.any((c) => c.name == f)) f,
+      ];
+      if (missing.isNotEmpty) problems.add('${q.app}/${q.name}.query.yaml: samlingen ${missing.join(', ')} finns inte');
+    }
+    return Workspace(collections, recipes, problems, queries: queries);
   }
 }
 

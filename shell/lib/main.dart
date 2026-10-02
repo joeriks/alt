@@ -196,6 +196,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         ),
       ),
     for (final c in _ws.collections) _Cmd('${c.appLabel} / ${c.label}', () => _push(CollectionScreen(collection: c))),
+    for (final q in _ws.queries)
+      _Cmd('${q.appLabel} / ${q.label}', () => _push(QueryScreen(query: q, collections: _ws.collections))),
     for (final r in _recipes)
       for (final t in r.triggers)
         if (t['menu'] != null)
@@ -253,6 +255,14 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     for (final (label, index) in menuLevel([for (final c in cmds) c.label], _path))
       _Entry(label, index == null ? null : cmds[index]),
   ];
+
+  /// Det man skrev i prompten skickas direkt till AI:n.
+  void _askAi() {
+    final ask = _q.text;
+    _q.clear();
+    FocusScope.of(context).unfocus();
+    _push(AiScreen(ask: ask, send: true)).then((_) => _reload());
+  }
 
   void _up() => setState(() => _path.removeLast());
 
@@ -333,12 +343,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                 // Ingen träff: erbjud att låta AI:n bygga det man skrev.
                 if (entries.isEmpty)
                   InkWell(
-                    onTap: () {
-                      final ask = _q.text;
-                      _q.clear();
-                      FocusScope.of(context).unfocus();
-                      _push(AiScreen(ask: ask)).then((_) => _reload());
-                    },
+                    onTap: _askAi,
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(minHeight: 48),
                       child: Align(
@@ -386,7 +391,11 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                                 isDense: true,
                               ),
                               onSubmitted: (_) {
-                                if (hits.isNotEmpty) _runCmd(hits.first);
+                                if (hits.isNotEmpty) {
+                                  _runCmd(hits.first);
+                                } else if (q.trim().isNotEmpty) {
+                                  _askAi();
+                                }
                               },
                             ),
                           ],

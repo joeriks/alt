@@ -52,6 +52,23 @@ void main() {
     }
   });
 
+  test('en fråga om posterna ska köras och finnas bland filerna', () {
+    final p = parseResponse(
+      reply({
+        'summary': 'Visar ej klara uppgifter.',
+        'run': 'apps/mb/open.query.yaml',
+        'files': [
+          {'path': 'apps/mb/open.query.yaml', 'content': 'from: tasks\n'},
+        ],
+      }),
+    );
+    expect(p.run, 'apps/mb/open.query.yaml');
+    expect(
+      () => parseResponse(reply({'summary': '', 'run': 'apps/mb/x.query.yaml', 'files': []})),
+      throwsA(isA<AiException>()),
+    );
+  });
+
   test('avböjt och avkortat svar ger tydliga fel', () {
     expect(() => parseResponse({'stop_reason': 'refusal', 'content': []}), throwsA(isA<AiException>()));
     expect(() => parseResponse(reply({}, stop: 'max_tokens')), throwsA(isA<AiException>()));

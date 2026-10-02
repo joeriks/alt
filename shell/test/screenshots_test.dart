@@ -211,5 +211,32 @@ void main() {
     await tester.tap(find.textContaining('till GitHub'));
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
     await shot(tester, 'spara_fraga');
+    await tester.tap(find.text('Avbryt'));
+
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('shot'),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: altTheme(),
+          home: AiScreen(
+            proposal: AiProposal(
+              'De här posterna i Privat kalender ligger framför dig de närmaste 30 dagarna.',
+              [
+                AiFile(
+                  'apps/memory_bank/upcoming.query.yaml',
+                  'label: Upcoming\nfrom: private_calendar\nwhere:\n  date: { from: today, to: today+30d }\nsort: date\n',
+                ),
+              ],
+              ore: 0.8,
+              run: 'apps/memory_bank/upcoming.query.yaml',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(seconds: 6));
+    await shot(tester, 'ai_svar_lista');
   }, skip: !run);
 }

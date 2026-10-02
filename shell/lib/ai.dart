@@ -89,6 +89,9 @@ Ni har ett samtal. Användaren skriver antingen en ändring, en fråga om sina p
 3. En fråga om hur appen fungerar: svara i summary och lämna files tom. run är "".
 4. Användaren vill lägga in något (t.ex. "tandläkare tisdag kl 14", "lägg till mammas födelsedag 11 oktober"): föreslå en eller flera nya poster i records. collection är samlingens namn (filnamnet utan .collection.yaml). values_json är ett JSON-objekt med fältnamn som nycklar: datum som "YYYY-MM-DD", tid som "HH:MM", bool som true/false, tal som tal. Räkna ut datum utifrån dagens datum. Välj den samling som passar bäst och fyll i alla obligatoriska fält. files är tom och run är "", om inte användaren också ber om en ändring. Användaren ser posterna och sparar dem själv.
 
+Varje post i records har id "" när den är ny.
+5. Användaren har öppnat chatten från en post (den står då i meddelandet under "Posten användaren tittar på"). Ber användaren om en ändring av den, svara med en post i records med postens id och samling, och values_json med BARA de fält som ändras (null tömmer ett fält). Ber användaren om en liknande post, svara med en ny post (id "") med alla fält ifyllda. Du kan bara ändra den posten, inga andra.
+
 Om inget passar ska records vara en tom lista. Skicka alltid med summary, run, files och records.
 
 Skriv alltid summary på svenska, en eller två meningar: vad du ändrade, vad listan visar eller svaret på frågan.
@@ -127,12 +130,20 @@ class AiFile {
   final String content;
 }
 
-/// En ny post som AI:n föreslår utifrån det användaren skrev. Sparas först när användaren trycker Spara.
+/// En post som AI:n föreslår utifrån det användaren skrev. Sparas först när användaren trycker Spara.
 class AiRecord {
-  AiRecord(this.collection, this.values);
+  AiRecord(this.collection, this.values, {this.id = ''});
   final String collection;
+
+  /// Id för posten som ändras, eller '' för en ny post.
+  final String id;
+
+  /// För en ny post alla fält; för en ändring bara de fält som ändras, där null tömmer fältet.
   final Map<String, dynamic> values;
 }
+
+/// Posten användaren öppnade chatten från. Den, och bara den, skickas med till AI:n.
+typedef AiShared = ({String collection, String id, Map<String, dynamic> values});
 
 class AiProposal {
   AiProposal(this.summary, this.files, {this.ore, this.run = '', this.records = const []});
@@ -172,9 +183,10 @@ const _schema = {
         'type': 'object',
         'properties': {
           'collection': {'type': 'string'},
+          'id': {'type': 'string'},
           'values_json': {'type': 'string'},
         },
-        'required': ['collection', 'values_json'],
+        'required': ['collection', 'id', 'values_json'],
         'additionalProperties': false,
       },
     },
@@ -198,7 +210,7 @@ const _schema = {
 /// En tidigare växling i samtalet: vad användaren skrev och vad AI:n svarade.
 typedef AiTurn = ({String ask, String summary});
 
-String _userMessage(String ask, Map<String, String> files, List<AiTurn> history) {
+String _userMessage(String ask, Map<String, String> files, List<AiTurn> history, AiShared? shared) {
   final listing = StringBuffer();
   for (final e in (files.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))) {
     listing.writeln('<file path="${e.key}">\n${e.value}\n</file>');
@@ -211,8 +223,12 @@ String _userMessage(String ask, Map<String, String> files, List<AiTurn> history)
   const days = ['måndag', 'tisdag', 'onsdag', 'torsdag', 'fredag', 'lördag', 'söndag'];
   final today =
       '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}, ${days[now.weekday - 1]}';
+  final post = shared == null
+      ? ''
+      : 'Posten användaren tittar på (samling ${shared.collection}, id ${shared.id}):\n'
+            '${jsonEncode(shared.values)}\n\n';
   return 'Receptrepots filer just nu:\n\n$listing\nI dag är det $today.\n\n'
-      '${earlier}Användarens nya meddelande:\n$ask';
+      '$post${earlier}Användarens nya meddelande:\n$ask';
 }
 
 /// Bygger förfrågan till Claude. [files] är relativ sökväg → innehåll.
@@ -221,6 +237,7 @@ Map<String, dynamic> buildRequest(
   Map<String, String> files, [
   List<AiTurn> history = const [],
   String modelId = model,
+  AiShared? shared,
 ]) => {
   'model': modelId,
   // Sonnet och Opus tänker alltid först, så de behöver mer utrymme; låg effort håller nere priset.
@@ -231,7 +248,7 @@ Map<String, dynamic> buildRequest(
   },
   'system': aiRules,
   'messages': [
-    {'role': 'user', 'content': _userMessage(ask, files, history)},
+    {'role': 'user', 'content': _userMessage(ask, files, history, shared)},
   ],
 };
 
@@ -241,6 +258,7 @@ Map<String, dynamic> buildOpenAiRequest(
   Map<String, String> files, [
   List<AiTurn> history = const [],
   String modelId = openAiModel,
+  AiShared? shared,
 ]) => {
   'model': modelId,
   'max_completion_tokens': 8000,
@@ -251,14 +269,14 @@ Map<String, dynamic> buildOpenAiRequest(
   },
   'messages': [
     {'role': 'system', 'content': aiRules},
-    {'role': 'user', 'content': _userMessage(ask, files, history)},
+    {'role': 'user', 'content': _userMessage(ask, files, history, shared)},
   ],
 };
 
 final _pathRule = RegExp(r'^(apps/[a-zåäö][a-zåäö0-9_]*/[a-zåäö0-9_.]+|types/[a-z0-9_.]+|lang/[a-z]{2}\.yaml)$');
 
 /// Tolkar förslaget. Kastar AiException för filer utanför apps/, types/ och lang/.
-AiProposal _proposal(String text, double? ore) {
+AiProposal _proposal(String text, double? ore, [AiShared? shared]) {
   final Map<String, dynamic> data;
   try {
     data = jsonDecode(text) as Map<String, dynamic>;
@@ -283,9 +301,13 @@ AiProposal _proposal(String text, double? ore) {
     if (!RegExp(r'^[a-zåäö][a-zåäö0-9_]*$').hasMatch(collection)) {
       throw AiException('AI:n föreslog en post i en okänd samling: $collection');
     }
+    final id = (r['id'] ?? '').toString().trim();
+    if (id.isNotEmpty && (shared == null || id != shared.id || collection != shared.collection)) {
+      throw AiException('AI:n ville ändra en annan post än den du tittar på.');
+    }
     try {
       final v = jsonDecode((r['values_json'] ?? '{}').toString());
-      records.add(AiRecord(collection, Map<String, dynamic>.from(v as Map)));
+      records.add(AiRecord(collection, Map<String, dynamic>.from(v as Map), id: id));
     } catch (_) {
       throw AiException('AI:n föreslog en post som inte gick att läsa.');
     }
@@ -296,7 +318,7 @@ AiProposal _proposal(String text, double? ore) {
 const _tooLong = 'Svaret blev för långt och avbröts. Försök med en mindre ändring.';
 
 /// Tolkar Claudes svar. Kastar AiException om Claude avböjde eller svaret blev avkortat.
-AiProposal parseResponse(Map<String, dynamic> res, [String modelId = model]) {
+AiProposal parseResponse(Map<String, dynamic> res, [String modelId = model, AiShared? shared]) {
   final stop = res['stop_reason'];
   if (stop == 'refusal') throw AiException('Claude avböjde förfrågan.');
   if (stop == 'max_tokens') throw AiException(_tooLong);
@@ -308,11 +330,11 @@ AiProposal parseResponse(Map<String, dynamic> res, [String modelId = model]) {
   final input = usage == null
       ? null
       : (usage['input_tokens'] as num? ?? 0) + (usage['cache_creation_input_tokens'] as num? ?? 0);
-  return _proposal(text, costOre(modelId, input, usage?['output_tokens'] as num?));
+  return _proposal(text, costOre(modelId, input, usage?['output_tokens'] as num?), shared);
 }
 
 /// Tolkar OpenAIs svar.
-AiProposal parseOpenAiResponse(Map<String, dynamic> res, [String modelId = openAiModel]) {
+AiProposal parseOpenAiResponse(Map<String, dynamic> res, [String modelId = openAiModel, AiShared? shared]) {
   final choice = ((res['choices'] as List?) ?? const []).firstOrNull as Map?;
   if (choice == null) throw AiException('Svaret gick inte att läsa.');
   final message = choice['message'] as Map? ?? const {};
@@ -322,11 +344,18 @@ AiProposal parseOpenAiResponse(Map<String, dynamic> res, [String modelId = openA
   return _proposal(
     (message['content'] ?? '').toString(),
     costOre(modelId, usage?['prompt_tokens'] as num?, usage?['completion_tokens'] as num?),
+    shared,
   );
 }
 
 /// Skickar ändringen till den valda AI-tjänsten och returnerar förslaget.
-Future<AiProposal> askAi(String ask, Map<String, String> files, {List<AiTurn> history = const []}) async {
+/// [shared] är posten användaren öppnade chatten från; den skickas med, inga andra poster.
+Future<AiProposal> askAi(
+  String ask,
+  Map<String, String> files, {
+  List<AiTurn> history = const [],
+  AiShared? shared,
+}) async {
   final chosen = await aiModel();
   final service = chosen.service;
   final key = service == AiService.claude ? await claudeKey() : await openAiKey();
@@ -347,8 +376,8 @@ Future<AiProposal> askAi(String ask, Map<String, String> files, {List<AiTurn> hi
     }
     req.headers.contentType = ContentType.json;
     final body = service == AiService.claude
-        ? buildRequest(ask, files, history)
-        : buildOpenAiRequest(ask, files, history);
+        ? buildRequest(ask, files, history, chosen.id, shared)
+        : buildOpenAiRequest(ask, files, history, chosen.id, shared);
     req.add(utf8.encode(jsonEncode(body)));
     final res = await req.close().timeout(const Duration(minutes: 5));
     final text = await res.transform(utf8.decoder).join();
@@ -367,7 +396,9 @@ Future<AiProposal> askAi(String ask, Map<String, String> files, {List<AiTurn> hi
     }
     if (res.statusCode != 200) throw AiException('Fel ${res.statusCode} från $name: ${apiMessage()}');
     final json = jsonDecode(text) as Map<String, dynamic>;
-    return service == AiService.claude ? parseResponse(json, chosen.id) : parseOpenAiResponse(json, chosen.id);
+    return service == AiService.claude
+        ? parseResponse(json, chosen.id, shared)
+        : parseOpenAiResponse(json, chosen.id, shared);
   } on SocketException {
     throw AiException('Ingen kontakt med $name. Är du ansluten till internet?');
   } finally {

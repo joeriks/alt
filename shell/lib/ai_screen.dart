@@ -37,8 +37,12 @@ class _Turn {
 /// Fråga AI som en chatt: fråga om dina poster, be om ändringar och ställ följdfrågor.
 /// Att spara eller ändra filer är ett sidospår vid varje svar.
 class AiScreen extends StatefulWidget {
-  const AiScreen({super.key, this.ask = '', this.send = false, this.proposal});
+  const AiScreen({super.key, this.ask = '', this.send = false, this.proposal, this.rec, this.back = 'Meny'});
   final String ask;
+  final String back;
+
+  /// Posten chatten öppnades från. Den skickas med till AI:n så att den kan ändras eller kopieras; inga andra poster skickas.
+  final Rec? rec;
 
   /// Skicka [ask] direkt när vyn öppnas.
   final bool send;
@@ -58,6 +62,9 @@ class _AiScreenState extends State<AiScreen> {
   /// Receptrepots filer med utkast ovanpå.
   Map<String, String> _files = {};
   AiModel _model = aiModels.first;
+
+  /// Posten som chatten gäller, som den ser ut nu.
+  late Rec? _rec = widget.rec;
 
   @override
   void initState() {
@@ -130,7 +137,13 @@ class _AiScreenState extends State<AiScreen> {
     setState(() => _turns.add(t));
     _toBottom();
     try {
-      t.proposal = await askAi(ask, files, history: history);
+      final r = _rec;
+      t.proposal = await askAi(
+        ask,
+        files,
+        history: history,
+        shared: r == null ? null : (collection: r.collection, id: r.id, values: r.values),
+      );
       t.collections = Workspace.fromFiles({...files, for (final f in t.proposal!.files) f.path: f.content}).collections;
       await _runQuery(t);
     } on AiException catch (e) {
@@ -192,7 +205,7 @@ class _AiScreenState extends State<AiScreen> {
   @override
   Widget build(BuildContext context) {
     return AltPage(
-      back: 'Meny',
+      back: widget.back,
       title: 'Fråga AI',
       bottom: Container(
         decoration: const BoxDecoration(
@@ -236,7 +249,13 @@ class _AiScreenState extends State<AiScreen> {
       child: ListView(
         controller: _scroll,
         children: [
-          if (_turns.isEmpty)
+          if (_turns.isEmpty && _rec != null)
+            Text(
+              'Be om en ändring av posten, till exempel "flytta till fredag", eller om en liknande post. '
+              'Den här posten skickas med till ${_model.name}, men inga andra poster.',
+              style: _small,
+            )
+          else if (_turns.isEmpty)
             Text(
               'Fråga om dina poster, till exempel "vad har jag i morgon?", eller be om en ändring. '
               'Filerna från ${defaultRepo.split('/').last} skickas till ${_model.name}, '
@@ -334,10 +353,27 @@ class _AiScreenState extends State<AiScreen> {
         ),
       );
     }
+    // En ändring gäller posten chatten öppnades från: dess värden med AI:ns ändringar ovanpå.
+    final before = r.id.isNotEmpty && _rec?.id == r.id ? _rec : null;
+    final merged = before == null ? r.values : {...before.values, ...r.values};
     final values = {
       for (final f in c.fields)
-        if (r.values[f.name] != null && r.values[f.name] != '') f.name: r.values[f.name],
+        if (merged[f.name] != null && merged[f.name] != '') f.name: merged[f.name],
     };
+    String show(Field f, Object? v) => v == null || v == ''
+        ? '–'
+        : f.type == 'bool'
+        ? (v == true ? 'ja' : 'nej')
+        : f.type == 'date' && DateTime.tryParse('$v') != null
+        ? dayLabel(DateTime.parse('$v'))
+        : '$v';
+    final changes = before == null
+        ? const <String>[]
+        : [
+            for (final f in c.fields)
+              if ('${before.values[f.name] ?? ''}' != '${values[f.name] ?? ''}')
+                '${f.label}: ${show(f, before.values[f.name])} → ${show(f, values[f.name])}',
+          ];
     final missing = [
       for (final f in c.fields)
         if (f.required && values[f.name] == null) f.label.toLowerCase(),
@@ -356,22 +392,46 @@ class _AiScreenState extends State<AiScreen> {
     ];
 
     Future<void> save() async {
-      final rec = await saveRecord(c, values);
+      final rec = await saveRecord(c, values, id: before?.id);
       if (!mounted) return;
-      setState(() => t.saved[i] = rec);
-      showUndo(context, 'Sparad: ${rec.str(c.titleField)}', () async {
-        await deleteRecord(rec);
-        if (mounted) setState(() => t.saved.remove(i));
+      setState(() {
+        t.saved[i] = rec;
+        if (before != null) _rec = rec;
+      });
+      showUndo(context, before != null ? 'Ändringen sparad' : 'Sparad: ${rec.str(c.titleField)}', () async {
+        if (before != null) {
+          await restoreRecord(before);
+        } else {
+          await deleteRecord(rec);
+        }
+        if (mounted) {
+          setState(() {
+            t.saved.remove(i);
+            if (before != null) _rec = before;
+          });
+        }
       });
     }
 
     Future<void> edit() async {
       final rec = await Navigator.of(context).push<Rec>(
         MaterialPageRoute(
-          builder: (_) => FormScreen(collection: c, back: 'Fråga AI', initial: values),
+          builder: (_) => FormScreen(collection: c, back: 'Fråga AI', rec: before, initial: values),
         ),
       );
-      if (rec != null && mounted) setState(() => t.saved[i] = rec);
+      if (rec != null && mounted) {
+        setState(() {
+          t.saved[i] = rec;
+          if (before != null) _rec = rec;
+        });
+      }
+    }
+
+    if (r.id.isNotEmpty && before == null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Text('AI:n ville ändra en post som inte finns här.', style: const TextStyle(color: red)),
+      );
     }
 
     return Container(
@@ -383,9 +443,15 @@ class _AiScreenState extends State<AiScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (before != null) Text('Ändring', style: _small),
           Text('${values[c.titleField] ?? '(utan titel)'}', style: const TextStyle(fontWeight: FontWeight.w700)),
-          if (sub.isNotEmpty) Text(sub, style: _small),
-          for (final x in rest) Text(x, style: _small),
+          if (before != null) ...[
+            for (final x in changes) Text(x, style: _small.copyWith(color: fg)),
+            if (changes.isEmpty) Text('Inga ändringar.', style: _small),
+          ] else ...[
+            if (sub.isNotEmpty) Text(sub, style: _small),
+            for (final x in rest) Text(x, style: _small),
+          ],
           if (missing.isNotEmpty)
             Text('Saknar ${missing.join(', ')}.', style: const TextStyle(color: red, fontSize: 14)),
           Wrap(
@@ -404,7 +470,8 @@ class _AiScreenState extends State<AiScreen> {
                   );
                 }),
               ] else ...[
-                if (missing.isEmpty) _link('Spara', save),
+                if (missing.isEmpty && (before == null || changes.isNotEmpty))
+                  _link(before != null ? 'Spara ändringen' : 'Spara', save),
                 _link('Ändra först ›', edit),
               ],
             ],

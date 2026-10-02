@@ -128,6 +128,31 @@ void main() {
     );
   });
 
+  test('posten man tittar på skickas med och bara den kan ändras', () {
+    const shared = (
+      collection: 'private_calendar',
+      id: 'tandläkare',
+      values: {'title': 'Tandläkare', 'date': '2026-10-06'},
+    );
+    final msg = buildRequest('flytta till fredag', {}, const [], model, shared)['messages'][0]['content'] as String;
+    expect(msg, contains('id tandläkare'));
+    expect(msg, contains('"title":"Tandläkare"'));
+    expect(buildRequest('x', {})['messages'][0]['content'], isNot(contains('Posten användaren tittar på')));
+    Map<String, dynamic> change(String coll, String id) => reply({
+      'summary': '',
+      'run': '',
+      'files': [],
+      'records': [
+        {'collection': coll, 'id': id, 'values_json': '{"date":"2026-10-09"}'},
+      ],
+    });
+    final p = parseResponse(change('private_calendar', 'tandläkare'), model, shared);
+    expect(p.records.single.id, 'tandläkare');
+    expect(() => parseResponse(change('private_calendar', 'annan'), model, shared), throwsA(isA<AiException>()));
+    expect(() => parseResponse(change('work_calendar', 'tandläkare'), model, shared), throwsA(isA<AiException>()));
+    expect(() => parseResponse(change('private_calendar', 'tandläkare')), throwsA(isA<AiException>()));
+  });
+
   test('modellval', () {
     expect(modelById('claude-haiku-4-5-20251001')?.name, modelById('claude-haiku-4-5')?.name);
     expect(modelById('okänd'), isNull);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'ai_screen.dart';
 import 'query.dart';
 import 'records.dart';
 import 'ui.dart';
@@ -179,6 +180,23 @@ class _RecordScreenState extends State<RecordScreen> {
     });
   }
 
+  /// Chatta med AI:n om den här posten: ändra den eller skapa en liknande.
+  Future<void> _askAi() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AiScreen(rec: _rec, back: _rec.str(c.titleField)),
+      ),
+    );
+    final now = await readRecord(_rec.collection, _rec.id);
+    if (!mounted) return;
+    if (now == null) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _versions = await historyCount(now);
+    if (mounted) setState(() => _rec = now);
+  }
+
   Future<void> _delete() async {
     final r = _rec;
     final messenger = ScaffoldMessenger.of(context);
@@ -234,6 +252,11 @@ class _RecordScreenState extends State<RecordScreen> {
               ),
               const SizedBox(width: 16),
               TextButton(
+                onPressed: _askAi,
+                child: const Text('fråga AI', style: TextStyle(color: accent)),
+              ),
+              const SizedBox(width: 16),
+              TextButton(
                 onPressed: _delete,
                 child: const Text('ta bort', style: TextStyle(color: muted)),
               ),
@@ -267,7 +290,7 @@ class FormScreen extends StatefulWidget {
 }
 
 class _FormScreenState extends State<FormScreen> {
-  late final Map<String, dynamic> _v = {...?widget.initial, ...?widget.rec?.values};
+  late final Map<String, dynamic> _v = {...?widget.rec?.values, ...?widget.initial};
   final Map<String, TextEditingController> _text = {};
   String? _error;
 

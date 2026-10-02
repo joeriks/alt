@@ -8,6 +8,7 @@ import 'package:alt/ai.dart';
 import 'package:alt/ai_screen.dart';
 import 'package:alt/dev.dart';
 import 'package:alt/main.dart';
+import 'package:alt/records.dart';
 import 'package:alt/ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -281,6 +282,45 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await shot(tester, 'ai_post_sparad');
     await tester.pump(const Duration(seconds: 6));
+
+    final tooth = Rec('private_calendar', 'tandläkare', {
+      'date': _iso(DateTime.now().add(const Duration(days: 4))),
+      'time': '14:30',
+      'title': 'Tandläkare',
+    });
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('shot'),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: altTheme(),
+          home: AiScreen(
+            key: const Key('andra'),
+            rec: tooth,
+            back: 'Tandläkare',
+            ask: 'flytta en dag framåt, och lägg in en likadan om ett halvår',
+            proposal: AiProposal(
+              'Jag flyttar tandläkaren en dag och föreslår en ny tid om ett halvår.',
+              [],
+              ore: 0.7,
+              records: [
+                AiRecord('private_calendar', {
+                  'date': _iso(DateTime.now().add(const Duration(days: 5))),
+                }, id: 'tandläkare'),
+                AiRecord('private_calendar', {
+                  'date': _iso(DateTime.now().add(const Duration(days: 186))),
+                  'time': '14:30',
+                  'title': 'Tandläkare',
+                }),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(seconds: 6));
+    await shot(tester, 'ai_andra_post');
 
     await tester.pumpWidget(
       RepaintBoundary(

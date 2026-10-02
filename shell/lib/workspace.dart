@@ -66,6 +66,7 @@ class Collection {
     required this.role,
     required this.encrypted,
     required this.titleField,
+    this.type,
   });
 
   final String name;
@@ -76,25 +77,49 @@ class Collection {
   final String? role;
   final bool encrypted;
   final String titleField;
+  final String? type;
 
   Field? get dateField => fields.where((f) => f.type == 'date').firstOrNull;
   Field? get timeField => fields.where((f) => f.type == 'time').firstOrNull;
 
-  static Collection parse(String name, String app, String appLabel, String source) {
+  /// [types] är de delade typerna från `types/*.type.yaml`. En samling med
+  /// `type: datumpost` får typens fält, roll och titel, och får lägga till egna
+  /// fält men inte ändra typens.
+  static Collection parse(
+    String name,
+    String app,
+    String appLabel,
+    String source, {
+    Map<String, Map<String, dynamic>> types = const {},
+  }) {
     final y = loadYaml(source);
     final m = jsonDecode(jsonEncode(y)) as Map<String, dynamic>;
-    final rawFields = m['fields'];
-    if (rawFields is! Map || rawFields.isEmpty) throw FormatException('$name saknar fields');
-    final fields = [for (final e in rawFields.entries) Field.parse(e.key.toString(), e.value)];
+    final typeName = m['type']?.toString();
+    final type = typeName == null ? null : types[typeName];
+    if (typeName != null && type == null) throw FormatException('$name: typen $typeName finns inte');
+    final fields = <Field>[];
+    for (final src in [type?['fields'], m['fields']]) {
+      if (src is! Map) continue;
+      for (final e in src.entries) {
+        final f = Field.parse(e.key.toString(), e.value);
+        if (fields.any((x) => x.name == f.name)) {
+          throw FormatException('$name: fältet ${f.name} finns redan i typen $typeName och får inte ändras');
+        }
+        fields.add(f);
+      }
+    }
+    if (fields.isEmpty) throw FormatException('$name saknar fields');
+    String? pick(String key) => m[key]?.toString() ?? type?[key]?.toString();
     return Collection(
       name: name,
       app: app,
       appLabel: appLabel,
       label: m['label']?.toString() ?? name,
       fields: fields,
-      role: m['role']?.toString(),
+      role: pick('role'),
       encrypted: m['encrypted'] != false,
-      titleField: m['title']?.toString() ?? fields.firstWhere((f) => f.type == 'text', orElse: () => fields.first).name,
+      titleField: pick('title') ?? fields.firstWhere((f) => f.type == 'text', orElse: () => fields.first).name,
+      type: typeName,
     );
   }
 }
@@ -115,6 +140,20 @@ class Workspace {
     final collections = <Collection>[];
     final recipes = <Recipe>[];
     final problems = <String>[];
+    final types = <String, Map<String, dynamic>>{};
+    final typeDir = Directory('${root.path}/types');
+    if (typeDir.existsSync()) {
+      for (final f in typeDir.listSync().whereType<File>().where((f) => f.path.endsWith('.type.yaml'))) {
+        final file = f.uri.pathSegments.last;
+        try {
+          types[file.substring(0, file.length - '.type.yaml'.length)] = Map<String, dynamic>.from(
+            jsonDecode(jsonEncode(loadYaml(f.readAsStringSync()))) as Map,
+          );
+        } catch (e) {
+          problems.add('types/$file: $e');
+        }
+      }
+    }
     final apps = Directory('${root.path}/apps');
     if (apps.existsSync()) {
       final appDirs = apps.listSync().whereType<Directory>().toList()..sort((a, b) => a.path.compareTo(b.path));
@@ -135,7 +174,7 @@ class Workspace {
           try {
             if (file.endsWith('.collection.yaml')) {
               final name = file.substring(0, file.length - '.collection.yaml'.length);
-              collections.add(Collection.parse(name, app, appLabel, f.readAsStringSync()));
+              collections.add(Collection.parse(name, app, appLabel, f.readAsStringSync(), types: types));
             } else if (file.endsWith('.recipe')) {
               recipes.add(Recipe.parse(f.readAsStringSync()));
             }
@@ -149,7 +188,7 @@ class Workspace {
   }
 }
 
-/// Hämtar alla filer under `apps/` från receptrepot. Returnerar antal filer.
+/// Hämtar alla filer under `apps/` och `types/` från receptrepot. Returnerar antal filer.
 Future<int> syncWorkspace() async {
   final token = await githubToken();
   if (token == null || token.isEmpty) throw StateError('ingen GitHub-nyckel, lägg in den under Inställningar / GitHub');
@@ -173,7 +212,7 @@ Future<int> syncWorkspace() async {
         jsonDecode(utf8.decode(await get('https://api.github.com/repos/$repo/git/trees/$branch?recursive=1'))) as Map;
     final paths = [
       for (final t in (tree['tree'] as List))
-        if (t['type'] == 'blob' && (t['path'] as String).startsWith('apps/')) t['path'] as String,
+        if (t['type'] == 'blob' && RegExp(r'^(apps|types)/').hasMatch(t['path'] as String)) t['path'] as String,
     ];
     final root = await workspaceDir();
     final tmp = Directory('${root.path}.new');

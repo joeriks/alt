@@ -21,8 +21,13 @@ fields:
     expect(c.encrypted, true);
     expect(c.dateField!.name, 'datum');
     expect(c.timeField!.name, 'tid');
-    expect(c.fields.map((f) => '${f.name}:${f.type}:${f.required}'),
-        ['datum:date:true', 'tid:time:false', 'titel:text:true', 'anteckning:longtext:false', 'vem:link:false']);
+    expect(c.fields.map((f) => '${f.name}:${f.type}:${f.required}'), [
+      'datum:date:true',
+      'tid:time:false',
+      'titel:text:true',
+      'anteckning:longtext:false',
+      'vem:link:false',
+    ]);
     expect(c.fields.last.link, 'person');
   });
 
@@ -37,5 +42,33 @@ fields:
     expect(slug('2026 bokslut'), 'p_2026_bokslut');
     expect(slug('Åka till Öland'), 'åka_till_öland');
     expect(slug('   '), 'post');
+  });
+
+  test('samlingar delar en typ och får lägga till fält', () {
+    final types = {
+      'datumpost': {
+        'role': 'timeline',
+        'title': 'titel',
+        'fields': {
+          'datum': {'date': null, 'required': null},
+          'titel': {'text': null},
+        },
+      },
+    };
+    final jobb = Collection.parse(
+      'jobb_kalender',
+      'minnesbank',
+      'Minnesbank',
+      'type: datumpost\nlabel: Jobb\nencrypted: false\nfields:\n  projekt: { text }\n',
+      types: types,
+    );
+    expect(jobb.role, 'timeline');
+    expect(jobb.encrypted, false);
+    expect(jobb.fields.map((f) => f.name), ['datum', 'titel', 'projekt']);
+    expect(
+      () => Collection.parse('x', 'a', 'A', 'type: datumpost\nfields:\n  datum: { text }\n', types: types),
+      throwsFormatException,
+    );
+    expect(() => Collection.parse('x', 'a', 'A', 'type: saknas\n', types: types), throwsFormatException);
   });
 }

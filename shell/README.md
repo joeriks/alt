@@ -20,7 +20,8 @@ med `Synka / Hämta recept`. Det kräver en GitHub-nyckel med läsrätt till rep
 under `Inställningar / GitHub-nyckel` och sparas krypterad på telefonen.
 
 Varje `*.collection.yaml` blir ett menyval med lista, post, formulär, borttagning och Ångra.
-Samlingar med `role: timeline` syns också i `Datum / 14 dagar`. Poster sparas som en fil per
+Samlingar med `role: timeline` syns också i `Datum / 14 dagar`. En typ i `types/<namn>.type.yaml`
+ger flera samlingar samma fält (`type: <namn>`); en samling får lägga till fält men inte ändra typens. Poster sparas som en fil per
 post i appens mapp; synk mot datarepot kommer i nästa steg.
 
 ## Delar

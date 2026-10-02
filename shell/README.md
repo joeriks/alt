@@ -13,11 +13,24 @@ på en schemalagd tid, även när appen är stängd?
 4. `Schema / Starta` kör receptet var 15:e minut. Loggen visar tiden mellan körningarna,
    så att man ser hur mycket Android förskjuter schemat.
 
+## Samlingar
+
+Skalet hämtar appar, samlingar och recept från receptrepot (standard `joeriks/alt-my-recepies`)
+med `Synka / Hämta recept`. Det kräver en GitHub-nyckel med läsrätt till repot, som läggs in
+under `Inställningar / GitHub-nyckel` och sparas krypterad på telefonen.
+
+Varje `*.collection.yaml` blir ett menyval med lista, post, formulär, borttagning och Ångra.
+Samlingar med `role: timeline` syns också i `Datum / 14 dagar`. Poster sparas som en fil per
+post i appens mapp; synk mot datarepot kommer i nästa steg.
+
 ## Delar
 
 - `recipes/hej.recipe` är testreceptet: YAML-huvud och JavaScript med `function run(ctx)`.
 - `lib/engine.dart` tolkar recept och kör dem i en ny QuickJS-runtime (flutter_js).
 - `lib/host.dart` sköter filer, körlogg, schema (android_alarm_manager_plus) och notiser.
+- `lib/workspace.dart` hämtar och tolkar appar, samlingar och recept.
+- `lib/records.dart` sparar poster, historik och papperskorg.
+- `lib/screens.dart` är lista, post, formulär och datumvy.
 - `lib/main.dart` är startsidan med kommandoprompten längst ner.
 
 Signeringsnyckeln `android/app/spike.keystore` är publik med avsikt så att varje bygge kan

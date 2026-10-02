@@ -35,6 +35,7 @@ jobs:
 
       - run: flutter pub get
       - run: flutter analyze
+      - run: flutter test
       - run: flutter build apk --release --build-number ${{ github.run_number }}
 
       - name: Publicera som release "senaste"

@@ -3,13 +3,9 @@ import 'package:flutter/material.dart';
 
 import 'engine.dart';
 import 'host.dart';
-
-const bg = Color(0xFF111210);
-const fg = Color(0xFFE9E7E1);
-const muted = Color(0xFFA3A19A);
-const accent = Color(0xFFF0B44C);
-const line = Color(0xFF24251F);
-const red = Color(0xFFE5776B);
+import 'screens.dart';
+import 'ui.dart';
+import 'workspace.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,18 +19,7 @@ class AltApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'alt',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: bg,
-        fontFamily: 'monospace',
-        colorScheme: const ColorScheme.dark(primary: accent, surface: bg),
-        textTheme: const TextTheme(bodyMedium: TextStyle(fontSize: 18, height: 1.5, color: fg)),
-      ),
-      home: const Home(),
-    );
+    return MaterialApp(title: 'alt', debugShowCheckedModeBanner: false, theme: altTheme(), home: const Home());
   }
 }
 
@@ -54,6 +39,7 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> with WidgetsBindingObserver {
   final _q = TextEditingController();
   List<Recipe> _recipes = [];
+  Workspace _ws = Workspace([], [], []);
   List<Map<String, dynamic>> _runs = [];
   String? _status;
 
@@ -78,10 +64,12 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   }
 
   Future<void> _reload() async {
+    final ws = await Workspace.load();
     final recipes = await loadRecipes();
     final runs = await readRuns();
     if (!mounted) return;
     setState(() {
+      _ws = ws;
       _recipes = recipes;
       _runs = runs;
     });
@@ -89,7 +77,55 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   void _say(String s) => setState(() => _status = s);
 
+  Future<void> _push(Widget screen) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+  }
+
+  Future<void> _askToken() async {
+    final ctl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1B18),
+        title: const Text('GitHub-nyckel', style: TextStyle(fontSize: 20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Läsrätt till ${defaultRepo.split('/').last}. Sparas krypterad på telefonen.',
+              style: const TextStyle(color: muted, fontSize: 15),
+            ),
+            TextField(controller: ctl, obscureText: true, autofocus: true, cursorColor: accent),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Avbryt')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Spara')),
+        ],
+      ),
+    );
+    if (ok == true && ctl.text.trim().isNotEmpty) {
+      await setGithubToken(ctl.text);
+      _say('nyckeln sparad, kör Synka / Hämta recept');
+    }
+    ctl.dispose();
+  }
+
   List<_Cmd> get _commands => [
+    if (_ws.collections.any((c) => c.role == 'timeline'))
+      _Cmd(
+        'Datum / 14 dagar',
+        () => _push(
+          TimelineScreen(
+            collections: [
+              for (final c in _ws.collections)
+                if (c.role == 'timeline') c,
+            ],
+          ),
+        ),
+      ),
+    for (final c in _ws.collections) _Cmd('${c.appLabel} / ${c.label}', () => _push(CollectionScreen(collection: c))),
     for (final r in _recipes)
       for (final t in r.triggers)
         if (t['menu'] != null)
@@ -103,6 +139,17 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                   : 'fel: ${res.error}',
             );
           }),
+    _Cmd('Synka / Hämta recept', () async {
+      _say('hämtar…');
+      try {
+        final n = await syncWorkspace();
+        final ws = await Workspace.load();
+        _say('hämtade $n filer${ws.problems.isEmpty ? '' : ', fel i ${ws.problems.join('; ')}'}');
+      } catch (e) {
+        _say('kunde inte hämta: $e');
+      }
+    }),
+    _Cmd('Inställningar / GitHub-nyckel', _askToken),
     _Cmd('Schema / Starta', () async {
       await requestNotificationPermission();
       final d = await scheduleAll();

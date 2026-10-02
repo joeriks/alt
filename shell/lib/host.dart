@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'engine.dart';
+import 'workspace.dart';
 
 /// Skalets sida av receptkörningen: filer, körlogg, schema och notiser.
 /// Används både av appen och av bakgrundskörningen (eget isolat).
@@ -34,12 +35,25 @@ Future<void> installBundledRecipes() async {
   }
 }
 
+/// Medföljande recept plus de som hämtats från receptrepot. Ett hämtat recept
+/// med samma namn ersätter det medföljande.
 Future<List<Recipe>> loadRecipes() async {
+  final byName = <String, Recipe>{};
   final dir = await recipesDir();
-  if (!dir.existsSync()) return [];
-  final files = dir.listSync().whereType<File>().where((f) => f.path.endsWith('.recipe')).toList()
-    ..sort((a, b) => a.path.compareTo(b.path));
-  return [for (final f in files) Recipe.parse(f.readAsStringSync())];
+  if (dir.existsSync()) {
+    final files = dir.listSync().whereType<File>().where((f) => f.path.endsWith('.recipe')).toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+    for (final f in files) {
+      try {
+        final r = Recipe.parse(f.readAsStringSync());
+        byName[r.name] = r;
+      } catch (_) {}
+    }
+  }
+  for (final r in (await Workspace.load()).recipes) {
+    byName[r.name] = r;
+  }
+  return byName.values.toList();
 }
 
 Future<List<Map<String, dynamic>>> readRuns({int limit = 50}) async {

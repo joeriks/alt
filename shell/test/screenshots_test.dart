@@ -171,6 +171,7 @@ void main() {
           debugShowCheckedModeBanner: false,
           theme: altTheme(),
           home: AiScreen(
+            ask: 'lägg till en samling för böcker jag har läst',
             proposal: AiProposal(
               'La till samlingen Books i Memory bank med titel, författare, betyg och datum, '
               'och svenska etiketter.',
@@ -194,9 +195,15 @@ void main() {
     );
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
     await shot(tester, 'ai_forslag');
-    await tester.tap(find.text('Spara utkast'));
+    await tester.tap(find.text('Visa ändringen ›'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await shot(tester, 'ai_andring');
+    await tester.tap(find.text('Bara utkast'));
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
     await shot(tester, 'ai_sparat');
+    await tester.binding.handlePopRoute();
+    await tester.pump(const Duration(milliseconds: 500));
+    await shot(tester, 'ai_tillbaka');
 
     await tester.pumpWidget(
       RepaintBoundary(

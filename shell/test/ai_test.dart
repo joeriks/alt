@@ -21,6 +21,16 @@ void main() {
     expect(msg, contains('lägg till böcker'));
   });
 
+  test('följdfrågor skickar med samtalet', () {
+    final r = buildRequest('sortera på titel', {}, [
+      (ask: 'vad har jag i morgon?', summary: 'Listar morgondagens poster.'),
+    ]);
+    final msg = r['messages'][0]['content'] as String;
+    expect(msg, contains('Användaren: vad har jag i morgon?'));
+    expect(msg, contains('Du: Listar morgondagens poster.'));
+    expect(msg, contains('sortera på titel'));
+  });
+
   test('svaret tolkas till filer', () {
     final p = parseResponse(
       reply({

@@ -48,7 +48,7 @@ Future<void> setAiService(AiService s) => _secure.write(key: 'ai_service', value
 
 const aiRules = '''
 Du ändrar filerna i en persons receptrepo för appen alt, en Android-app där användaren bygger egna små appar utan att bygga om appen.
-Användaren skriver antingen en ändring, en fråga om sina poster eller en fråga om appen.
+Ni har ett samtal. Användaren skriver antingen en ändring, en fråga om sina poster, en fråga om appen eller en följdfråga till något tidigare i samtalet. En följdfråga bygger vidare på ditt förra svar, till exempel en ändrad fråga.
 
 1. En ändring (t.ex. "lägg till en samling för böcker"): svara med de filer som ska ändras eller skapas, med HELA det nya innehållet i varje fil. Ändra bara det som behövs och rör inte andra filer. run är "".
 2. En fråga om användarens poster (t.ex. "vilka uppgifter har jag kvar?", "vad händer nästa vecka?"): du ser ALDRIG posterna, bara samlingarnas filer. Skriv en sparad fråga, apps/<app>/<namn>.query.yaml, som tar fram rätt poster. Lägg den i files och sätt run till dess sökväg; appen kör den på telefonen och visar listan. Lägg också till en svensk etikett för den i lang/sv.yaml under queries.
@@ -138,16 +138,23 @@ const _schema = {
   'additionalProperties': false,
 };
 
-String _userMessage(String ask, Map<String, String> files) {
+/// En tidigare växling i samtalet: vad användaren skrev och vad AI:n svarade.
+typedef AiTurn = ({String ask, String summary});
+
+String _userMessage(String ask, Map<String, String> files, List<AiTurn> history) {
   final listing = StringBuffer();
   for (final e in (files.entries.toList()..sort((a, b) => a.key.compareTo(b.key)))) {
     listing.writeln('<file path="${e.key}">\n${e.value}\n</file>');
   }
-  return 'Receptrepots filer just nu:\n\n$listing\nÄndring jag vill ha:\n$ask';
+  final earlier = history.isEmpty
+      ? ''
+      : 'Tidigare i samtalet (filerna ovan innehåller redan dina tidigare förslag):\n'
+            '${[for (final t in history) 'Användaren: ${t.ask}\nDu: ${t.summary}'].join('\n')}\n\n';
+  return 'Receptrepots filer just nu:\n\n$listing\n${earlier}Användarens nya meddelande:\n$ask';
 }
 
 /// Bygger förfrågan till Claude. [files] är relativ sökväg → innehåll.
-Map<String, dynamic> buildRequest(String ask, Map<String, String> files) => {
+Map<String, dynamic> buildRequest(String ask, Map<String, String> files, [List<AiTurn> history = const []]) => {
   'model': model,
   'max_tokens': 8000,
   'output_config': {
@@ -155,12 +162,12 @@ Map<String, dynamic> buildRequest(String ask, Map<String, String> files) => {
   },
   'system': aiRules,
   'messages': [
-    {'role': 'user', 'content': _userMessage(ask, files)},
+    {'role': 'user', 'content': _userMessage(ask, files, history)},
   ],
 };
 
 /// Bygger förfrågan till OpenAI (Chat Completions med JSON-schema).
-Map<String, dynamic> buildOpenAiRequest(String ask, Map<String, String> files) => {
+Map<String, dynamic> buildOpenAiRequest(String ask, Map<String, String> files, [List<AiTurn> history = const []]) => {
   'model': openAiModel,
   'max_completion_tokens': 8000,
   'reasoning_effort': 'low',
@@ -170,7 +177,7 @@ Map<String, dynamic> buildOpenAiRequest(String ask, Map<String, String> files) =
   },
   'messages': [
     {'role': 'system', 'content': aiRules},
-    {'role': 'user', 'content': _userMessage(ask, files)},
+    {'role': 'user', 'content': _userMessage(ask, files, history)},
   ],
 };
 
@@ -232,7 +239,7 @@ AiProposal parseOpenAiResponse(Map<String, dynamic> res) {
 }
 
 /// Skickar ändringen till den valda AI-tjänsten och returnerar förslaget.
-Future<AiProposal> askAi(String ask, Map<String, String> files) async {
+Future<AiProposal> askAi(String ask, Map<String, String> files, {List<AiTurn> history = const []}) async {
   final service = await aiService();
   final key = service == AiService.claude ? await claudeKey() : await openAiKey();
   final name = service.label;
@@ -251,7 +258,9 @@ Future<AiProposal> askAi(String ask, Map<String, String> files) async {
       req.headers.set('Authorization', 'Bearer $key');
     }
     req.headers.contentType = ContentType.json;
-    final body = service == AiService.claude ? buildRequest(ask, files) : buildOpenAiRequest(ask, files);
+    final body = service == AiService.claude
+        ? buildRequest(ask, files, history)
+        : buildOpenAiRequest(ask, files, history);
     req.add(utf8.encode(jsonEncode(body)));
     final res = await req.close().timeout(const Duration(minutes: 5));
     final text = await res.transform(utf8.decoder).join();

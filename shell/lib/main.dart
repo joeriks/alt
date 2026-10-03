@@ -10,6 +10,7 @@ import 'engine.dart';
 import 'host.dart';
 import 'records.dart';
 import 'screens.dart';
+import 'setup.dart';
 import 'sync.dart';
 import 'sync_screen.dart';
 import 'ui.dart';
@@ -105,7 +106,15 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       _syncTimer?.cancel();
       _syncTimer = Timer(const Duration(seconds: 5), () => _sync());
     };
-    _reload().then((_) => _sync());
+    _reload().then((_) async {
+      // Första gången, utan nyckel: visa guiden direkt.
+      if (((await githubToken()) ?? '').isEmpty && !await setupSeen()) {
+        await markSetupSeen();
+        if (mounted) await _push(const SetupScreen());
+        await _reload();
+      }
+      await _sync();
+    });
   }
 
   Timer? _syncTimer;
@@ -113,7 +122,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   /// Synkar posterna med datarepot. I bakgrunden sägs bara det som behöver göras något åt.
   Future<void> _sync({bool quiet = true}) async {
     if (((await githubToken()) ?? '').isEmpty) {
-      if (!quiet) _say('lägg in en GitHub-nyckel under System / GitHub-nyckel först');
+      if (!quiet) _say('koppla GitHub först, under System / Koppla GitHub');
       return;
     }
     if (!quiet) _say('synkar…');
@@ -226,14 +235,6 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   Future<void> _push(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
   }
-
-  Future<void> _askToken() => _askSecret(
-    'GitHub-nyckel',
-    'Läs- och skrivrätt (Contents) till ${defaultRepo.split('/').last} och ${defaultDataRepo.split('/').last}. '
-        'Sparas krypterad på telefonen.',
-    setGithubToken,
-    'nyckeln sparad, kör System / Hämta recept',
-  );
 
   Future<void> _askClaudeKey() => _askSecret(
     'Claude-nyckel',
@@ -377,7 +378,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         _say('kunde inte hämta: $e');
       }
     }),
-    _Cmd('System / GitHub-nyckel', _askToken),
+    _Cmd('System / Koppla GitHub', () => _push(const SetupScreen())),
     _Cmd('System / Data / Synka nu', () => _sync(quiet: false)),
     _Cmd('System / Data / Lösenfras', _askPassphrase),
     _Cmd('System / AI / Claude-nyckel', _askClaudeKey),

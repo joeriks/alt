@@ -51,7 +51,7 @@ class _GitHub {
       } catch (_) {}
       throw PublishException(
         'Nyckeln får inte skriva till ${repo.split('/').last}. '
-        'Ge den "Contents: Read and write" på GitHub och lägg in den igen under System / GitHub-nyckel.$detail',
+        'Ge den "Contents: Read and write" på GitHub och kör System / Koppla GitHub igen.$detail',
       );
     }
     if (res.statusCode == 409 || res.statusCode == 422) {
@@ -69,7 +69,7 @@ class _GitHub {
 Future<String> publishFiles(Map<String, String> files, String message) async {
   final token = await githubToken();
   if (token == null || token.isEmpty) {
-    throw PublishException('Ingen GitHub-nyckel. Lägg in den under System / GitHub-nyckel.');
+    throw PublishException('Ingen GitHub-nyckel. Kör System / Koppla GitHub.');
   }
   final gh = _GitHub(token, await recipesRepo());
   try {

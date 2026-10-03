@@ -252,7 +252,7 @@ class Workspace {
 /// Hämtar alla filer under `apps/`, `types/` och `lang/` från receptrepot. Returnerar antal filer.
 Future<int> syncWorkspace() async {
   final token = await githubToken();
-  if (token == null || token.isEmpty) throw StateError('ingen GitHub-nyckel, lägg in den under Inställningar / GitHub');
+  if (token == null || token.isEmpty) throw StateError('ingen GitHub-nyckel, kör System / Koppla GitHub');
   final repo = await recipesRepo();
   final client = HttpClient();
   Future<List<int>> get(String url, {bool raw = false}) async {

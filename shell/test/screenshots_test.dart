@@ -9,6 +9,7 @@ import 'package:alt/ai_screen.dart';
 import 'package:alt/dev.dart';
 import 'package:alt/main.dart';
 import 'package:alt/records.dart';
+import 'package:alt/setup.dart';
 import 'package:alt/sync.dart';
 import 'package:alt/sync_screen.dart';
 import 'package:alt/workspace.dart';
@@ -101,7 +102,7 @@ void main() {
     );
     rec('private_calendar', 'gammalt', 'date: "${_iso(t.subtract(const Duration(days: 20)))}"\ntitle: "Besiktning"\n');
     PathProviderPlatform.instance = _FakePaths(root.path);
-    FlutterSecureStorage.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({'setup_seen': '1'});
   });
 
   testWidgets('flöden', (tester) async {
@@ -372,5 +373,36 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('Den här telefonen'));
     await shot(tester, 'krock');
+
+    for (var i = 0; i < 3; i++) {
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: const Key('shot'),
+          child: MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: altTheme(),
+            home: SetupScreen(
+              key: Key('setup$i'),
+              start: i,
+              checks: i < 2
+                  ? null
+                  : [
+                      Check('Nyckeln tillhör joeriks', true),
+                      Check('Receptrepot: joeriks/alt-my-recepies hittades', true),
+                      Check('Receptrepot: nyckeln får skriva', true),
+                      Check(
+                        'Datarepot: joeriks/alt-my-data',
+                        false,
+                        'Nyckeln hittar inte repot. Kontrollera stavningen, eller redigera nyckeln på GitHub och '
+                            'lägg till alt-my-data under Repository access.',
+                      ),
+                    ],
+            ),
+          ),
+        ),
+      );
+      await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
+      await shot(tester, 'koppla_${i + 1}');
+    }
   }, skip: !run);
 }

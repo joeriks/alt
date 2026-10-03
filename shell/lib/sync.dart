@@ -112,7 +112,7 @@ class GitHubRemote implements DataRemote {
     if (res.statusCode == 403 || (res.statusCode == 404 && path.isEmpty)) {
       throw SyncException(
         'Nyckeln kommer inte åt $name. Ge den "Contents: Read and write" för $name på GitHub '
-        'och lägg in den igen under System / GitHub-nyckel.',
+        'och kör System / Koppla GitHub igen.',
       );
     }
     return (res.statusCode, text.isEmpty ? null : jsonDecode(text));
@@ -225,7 +225,7 @@ Future<void> setPassphrase(String passphrase, {DataRemote? remote}) async {
 Future<GitHubRemote> _gitHub() async {
   final token = await githubToken();
   if (token == null || token.isEmpty) {
-    throw SyncException('Ingen GitHub-nyckel. Lägg in den under System / GitHub-nyckel.');
+    throw SyncException('Ingen GitHub-nyckel. Kör System / Koppla GitHub.');
   }
   return GitHubRemote(token, await dataRepo());
 }

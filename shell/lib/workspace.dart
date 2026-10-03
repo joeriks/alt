@@ -159,10 +159,13 @@ class Collection {
 }
 
 class Workspace {
-  Workspace(this.collections, this.recipes, this.problems, {this.queries = const []});
+  Workspace(this.collections, this.recipes, this.problems, {this.queries = const [], this.recipePaths = const {}});
 
   final List<Collection> collections;
   final List<Recipe> recipes;
+
+  /// Receptets namn → filens sökväg i receptrepot, för att kunna öppna filen från menyn.
+  final Map<String, String> recipePaths;
   final List<Query> queries;
 
   /// Filer som inte gick att läsa, så att ett trasigt recept inte stoppar resten.
@@ -188,6 +191,7 @@ class Workspace {
     final paths = files.keys.toList()..sort();
     final collections = <Collection>[];
     final recipes = <Recipe>[];
+    final recipePaths = <String, String>{};
     final queries = <Query>[];
     final problems = <String>[];
     var lang = const <String, dynamic>{};
@@ -230,6 +234,7 @@ class Workspace {
           collections.add(Collection.parse(name, app, appLabels[app]!, files[p]!, types: types, lang: lang));
         } else if (file.endsWith('.recipe')) {
           recipes.add(Recipe.parse(files[p]!));
+          recipePaths[recipes.last.name] = p;
         } else if (file.endsWith('.query.yaml')) {
           final name = file.substring(0, file.length - '.query.yaml'.length);
           queries.add(Query.parse(name, app, appLabels[app]!, files[p]!, lang: lang));
@@ -245,7 +250,7 @@ class Workspace {
       ];
       if (missing.isNotEmpty) problems.add('${q.app}/${q.name}.query.yaml: samlingen ${missing.join(', ')} finns inte');
     }
-    return Workspace(collections, recipes, problems, queries: queries);
+    return Workspace(collections, recipes, problems, queries: queries, recipePaths: recipePaths);
   }
 }
 

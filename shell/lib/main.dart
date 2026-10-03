@@ -33,9 +33,12 @@ class AltApp extends StatelessWidget {
 }
 
 class _Cmd {
-  _Cmd(this.label, this.action);
+  _Cmd(this.label, this.action, {this.file});
   final String label;
   final Future<void> Function() action;
+
+  /// Filen i receptrepot bakom valet, som öppnas med ett långt tryck.
+  final String? file;
 
   List<String> get segments => label.split('/').map((s) => s.trim()).toList();
 }
@@ -232,8 +235,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   void _say(String s) => setState(() => _status = s);
 
+  /// Öppnar en vy och läser om menyn när man kommer tillbaka, så att ändrade recept och samlingar syns direkt.
   Future<void> _push(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    await _reload();
   }
 
   Future<void> _askClaudeKey() => _askSecret(
@@ -352,13 +357,22 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           ),
         ),
       ),
-    for (final c in _ws.collections) _Cmd('${c.appLabel} / ${c.label}', () => _push(CollectionScreen(collection: c))),
+    for (final c in _ws.collections)
+      _Cmd(
+        '${c.appLabel} / ${c.label}',
+        () => _push(CollectionScreen(collection: c)),
+        file: 'apps/${c.app}/${c.name}.collection.yaml',
+      ),
     for (final q in _ws.queries)
-      _Cmd('${q.appLabel} / ${q.label}', () => _push(QueryScreen(query: q, collections: _ws.collections))),
+      _Cmd(
+        '${q.appLabel} / ${q.label}',
+        () => _push(QueryScreen(query: q, collections: _ws.collections)),
+        file: 'apps/${q.app}/${q.name}.query.yaml',
+      ),
     for (final r in _recipes)
       for (final t in r.triggers)
         if (t['menu'] != null)
-          _Cmd(t['menu'].toString(), () async {
+          _Cmd(t['menu'].toString(), file: _ws.recipePaths[r.name], () async {
             final res = await runAndDeliver(r, 'menu');
             _say(
               res == null
@@ -372,7 +386,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       _say('hämtar…');
       try {
         final n = await syncWorkspace();
-        final ws = await Workspace.load();
+        await _reload();
+        final ws = _ws;
         _say('hämtade $n filer${ws.problems.isEmpty ? '' : ', fel i ${ws.problems.join('; ')}'}');
       } catch (e) {
         _say('kunde inte hämta: $e');
@@ -480,6 +495,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                 for (final e in entries)
                   InkWell(
                     onTap: () => e.cmd == null ? setState(() => _path.add(e.label)) : _runCmd(e.cmd!),
+                    // Långt tryck öppnar filen bakom valet för att ändra den.
+                    onLongPress: e.cmd?.file == null ? null : () => _push(FileScreen(path: e.cmd!.file!)),
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(minHeight: 48),
                       child: Align(

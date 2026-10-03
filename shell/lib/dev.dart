@@ -195,10 +195,43 @@ class _FileScreenState extends State<FileScreen> {
   Future<void> _edit() async {
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => EditScreen(path: widget.path, text: _text),
+        builder: (_) => EditScreen(path: widget.path, text: _text, publish: true),
       ),
     );
     if (changed == true) await _load();
+  }
+
+  Future<void> _delete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1B18),
+        title: Text('Ta bort $_name?', style: const TextStyle(fontSize: 20)),
+        content: Text(
+          'Filen tas bort från ${defaultRepo.split('/').last} och ur appen. '
+          'Den finns kvar i historiken på GitHub om du ångrar dig.',
+          style: const TextStyle(color: muted, fontSize: 15),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Avbryt')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ta bort', style: TextStyle(color: red)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context);
+    try {
+      if (_synced.isNotEmpty) await publishFiles({widget.path: null}, 'Tog bort $_name i appen');
+      await discardDraft(widget.path);
+      messenger.showSnackBar(SnackBar(content: Text('$_name borttagen'), persist: false));
+      nav.pop();
+    } on PublishException catch (e) {
+      if (mounted) await _message(context, 'Kunde inte ta bort', e.message);
+    }
   }
 
   Future<void> _discard() async {
@@ -263,6 +296,14 @@ class _FileScreenState extends State<FileScreen> {
                 ),
               ],
             ),
+          if (_draft == null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _delete,
+                child: const Text('ta bort', style: TextStyle(color: muted)),
+              ),
+            ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: SelectableText.rich(
@@ -301,9 +342,12 @@ class _FileScreenState extends State<FileScreen> {
 }
 
 class EditScreen extends StatefulWidget {
-  const EditScreen({super.key, required this.path, required this.text});
+  const EditScreen({super.key, required this.path, required this.text, this.publish = false});
   final String path;
   final String text;
+
+  /// Spara går direkt till GitHub (efter kontroll och bekräftelse); "bara utkast" finns som sidoval.
+  final bool publish;
 
   @override
   State<EditScreen> createState() => _EditScreenState();
@@ -323,6 +367,12 @@ class _EditScreenState extends State<EditScreen> {
     if (mounted) Navigator.of(context).pop(true);
   }
 
+  Future<void> _publish() async {
+    await writeDraft(widget.path, _ctl.text);
+    if (!mounted) return;
+    if (await publishDrafts(context, [widget.path]) && mounted) Navigator.of(context).pop(true);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AltPage(
@@ -330,7 +380,11 @@ class _EditScreenState extends State<EditScreen> {
       title: 'Redigera',
       bottom: Row(
         children: [
-          Expanded(child: PrimaryButton('Spara utkast', onTap: _save)),
+          Expanded(
+            child: widget.publish
+                ? PrimaryButton('Spara', onTap: _publish)
+                : PrimaryButton('Spara utkast', onTap: _save),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Padding(
@@ -351,18 +405,35 @@ class _EditScreenState extends State<EditScreen> {
           ),
         ],
       ),
-      child: TextField(
-        controller: _ctl,
-        expands: true,
-        maxLines: null,
-        autocorrect: false,
-        enableSuggestions: false,
-        keyboardType: TextInputType.multiline,
-        textAlignVertical: TextAlignVertical.top,
-        cursorColor: accent,
-        style: _code,
-        decoration: const InputDecoration(border: InputBorder.none),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (widget.publish)
+            InkWell(
+              onTap: _save,
+              child: const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text('bara utkast ›', style: TextStyle(color: muted, fontSize: 15)),
+              ),
+            ),
+          Expanded(child: _field()),
+        ],
       ),
+    );
+  }
+
+  Widget _field() {
+    return TextField(
+      controller: _ctl,
+      expands: true,
+      maxLines: null,
+      autocorrect: false,
+      enableSuggestions: false,
+      keyboardType: TextInputType.multiline,
+      textAlignVertical: TextAlignVertical.top,
+      cursorColor: accent,
+      style: _code,
+      decoration: const InputDecoration(border: InputBorder.none),
     );
   }
 }
@@ -613,7 +684,7 @@ Future<void> newQuery(BuildContext context) async {
   final path = 'apps/$app/$name.query.yaml';
   final saved = await Navigator.of(context).push<bool>(
     MaterialPageRoute(
-      builder: (_) => EditScreen(path: path, text: template),
+      builder: (_) => EditScreen(path: path, text: template, publish: true),
     ),
   );
   // Efter sparat utkast: visa filen, där man kan prova den igen och spara till GitHub.

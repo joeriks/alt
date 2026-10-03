@@ -64,9 +64,9 @@ class _GitHub {
   void close() => _client.close();
 }
 
-/// Skriver [files] (relativ sökväg → text) till receptrepot och till den lokala kopian.
+/// Skriver [files] (relativ sökväg → text, eller null för att ta bort) till receptrepot och till den lokala kopian.
 /// Returnerar commitens korta id.
-Future<String> publishFiles(Map<String, String> files, String message) async {
+Future<String> publishFiles(Map<String, String?> files, String message) async {
   final token = await githubToken();
   if (token == null || token.isEmpty) {
     throw PublishException('Ingen GitHub-nyckel. Kör System / Koppla GitHub.');
@@ -97,7 +97,12 @@ Future<String> publishFiles(Map<String, String> files, String message) async {
     final newTree = await gh.call('POST', '/git/trees', {
       'base_tree': baseTree,
       'tree': [
-        for (final e in files.entries) {'path': e.key, 'mode': '100644', 'type': 'blob', 'content': e.value},
+        for (final e in files.entries)
+          if (e.value != null)
+            {'path': e.key, 'mode': '100644', 'type': 'blob', 'content': e.value}
+          else if (remote.containsKey(e.key))
+            // sha: null tar bort filen.
+            {'path': e.key, 'mode': '100644', 'type': 'blob', 'sha': null},
       ],
     });
     final commit = await gh.call('POST', '/git/commits', {
@@ -108,8 +113,12 @@ Future<String> publishFiles(Map<String, String> files, String message) async {
     await gh.call('PATCH', '/git/refs/heads/$branch', {'sha': commit['sha'], 'force': false});
     for (final e in files.entries) {
       final f = File('${root.path}/${e.key}');
+      if (e.value == null) {
+        if (f.existsSync()) f.deleteSync();
+        continue;
+      }
       f.parent.createSync(recursive: true);
-      f.writeAsStringSync(e.value, flush: true);
+      f.writeAsStringSync(e.value!, flush: true);
     }
     return (commit['sha'] as String).substring(0, 7);
   } on SocketException {

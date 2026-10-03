@@ -9,6 +9,7 @@ import 'package:alt/ai_screen.dart';
 import 'package:alt/dev.dart';
 import 'package:alt/main.dart';
 import 'package:alt/records.dart';
+import 'package:alt/screens.dart';
 import 'package:alt/setup.dart';
 import 'package:alt/sync.dart';
 import 'package:alt/sync_screen.dart';
@@ -101,6 +102,17 @@ void main() {
       'date: "${_iso(t.add(const Duration(days: 1)))}"\ntime: "10:00"\ntitle: "Sprintdemo"\nproject: "alve"\n',
     );
     rec('private_calendar', 'gammalt', 'date: "${_iso(t.subtract(const Duration(days: 20)))}"\ntitle: "Besiktning"\n');
+    File('${root.path}/workspace/apps/memory_bank/responsibilities.collection.yaml').writeAsStringSync(
+      'label: Responsibilities\ntitle: header\nfields:\n  header: { text, required, label: Header }\n'
+      '  description: { text, label: Description }\n',
+    );
+    File('${root.path}/workspace/apps/memory_bank/under_areas.collection.yaml').writeAsStringSync(
+      'label: Sub-areas\ntitle: title\nfields:\n  title: { text, required, label: Title }\n'
+      '  description: { text, label: Description }\n  parent: { link: responsibilities, required, label: Area }\n',
+    );
+    rec('responsibilities', 'huset', 'header: "Huset"\ndescription: "Underhåll och försäkring"\n');
+    rec('under_areas', 'tak', 'title: "Taket"\ndescription: "Rensa hängrännor varje höst"\nparent: "huset"\n');
+    rec('under_areas', 'värme', 'title: "Värmepumpen"\ndescription: "Byt filter i mars"\nparent: "huset"\n');
     PathProviderPlatform.instance = _FakePaths(root.path);
     FlutterSecureStorage.setMockInitialValues({'setup_seen': '1'});
   });
@@ -410,5 +422,29 @@ void main() {
       await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
       await shot(tester, 'koppla_${i + 1}');
     }
+
+    final ws = (await tester.runAsync(Workspace.load))!;
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('shot'),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: altTheme(),
+          home: RecordScreen(
+            collection: ws.collection('responsibilities')!,
+            rec: Rec('responsibilities', 'huset', {'header': 'Huset', 'description': 'Underhåll och försäkring'}),
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(milliseconds: 300));
+    await shot(tester, 'underposter');
+    await tester.tap(find.text('+ lägg till'));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(milliseconds: 300));
+    await shot(tester, 'underpost_ny');
   }, skip: !run);
 }

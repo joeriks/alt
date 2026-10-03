@@ -243,6 +243,15 @@ class Workspace {
         problems.add('$app/$file: $e');
       }
     }
+    for (final c in collections) {
+      for (final f in c.fields.where((f) => f.type == 'link')) {
+        if (!collections.any((x) => x.name == f.link)) {
+          problems.add(
+            '${c.app}/${c.name}.collection.yaml: fältet ${f.name} kopplar till samlingen ${f.link}, som inte finns',
+          );
+        }
+      }
+    }
     for (final q in queries) {
       final missing = [
         for (final f in q.from)

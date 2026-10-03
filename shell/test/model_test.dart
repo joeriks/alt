@@ -136,4 +136,15 @@ fields:
     expect(menuLevel(labels, ['Minnesbank']), [('Privat kalender', 1), ('Jobbkalender', 2)]);
     expect(menuLevel(labels, ['Okänd']), isEmpty);
   });
+
+  test('en koppling till en samling som inte finns rapporteras', () {
+    final ws = Workspace.fromFiles({
+      'apps/mb/app.yaml': 'label: MB\n',
+      'apps/mb/areas.collection.yaml': 'title: header\nfields:\n  header: { text, required }\n',
+      'apps/mb/sub_areas.collection.yaml': 'fields:\n  title: { text }\n  parent: { link: areas, required }\n',
+      'apps/mb/logs.collection.yaml': 'fields:\n  title: { text }\n  area: { link: under_areas }\n',
+    });
+    expect(ws.problems.single, contains('under_areas'));
+    expect(ws.collection('sub_areas')!.fields.firstWhere((f) => f.name == 'parent').link, 'areas');
+  });
 }

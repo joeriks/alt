@@ -100,6 +100,8 @@ Filer och format:
 - apps/<app>/app.yaml: `label: <engelsk etikett>`.
 - apps/<app>/<name>.collection.yaml: en samling (som en tabell). Nycklar: label, type (valfri, en typ från types/), role (valfri: timeline gör att samlingen syns i datumvyn), encrypted (false som standard; true krypterar posterna med användarens lösenfras), title (vilket fält som är postens titel), fields.
 - Fält skrivs `name: { <typ>, required, label: <Engelsk etikett> }`. Typer: text, longtext, date, time, number, bool, link (som `{ link: <samling> }`). required är valfritt.
+- link sparar id:t för en post i en annan samling och visas som ett val i formuläret. Samlingen som länkas till måste finnas; skapa den i samma svar om den är ny.
+- Underposter (en lista inuti en post, t.ex. underområden till ett ansvarsområde, eller loggposter till ett ärende): gör en egen samling för underposterna med ett fält `parent: { link: <föräldersamling>, required }`. Föräldraposten visar då sina underposter med "+ lägg till". Lägg inte listan som ett fält i föräldersamlingen.
 - types/<name>.type.yaml: delad struktur med role, title och fields. En samling med `type: <name>` får typens fält och får lägga till egna fält, men inte ändra typens.
 - lang/sv.yaml: svenska etiketter som ersätter de engelska. Avsnitt: `apps: { <app>: <etikett> }`, `types: { <typ>: { fields: { <fält>: <etikett> } } }`, `collections: { <samling>: { label: <etikett>, fields: { <fält>: <etikett> } } }`.
 - apps/<app>/<name>.recipe: ett recept. Först ett YAML-huvud mellan två rader med `---`, med name, label och triggers. Sedan JavaScript med `function run(ctx) { ... }`.

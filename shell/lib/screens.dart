@@ -17,6 +17,20 @@ int _byDate(Rec a, Rec b, Collection c) {
 }
 
 /// En rad i en lista: titel, och under den datum/tid i grått.
+/// Titeln på posten som ett kopplingsfält pekar på, eller id:t om posten inte finns.
+Future<String> linkTitle(Collection? target, String id) async {
+  if (target == null || id.isEmpty) return id;
+  final r = await readRecord(target.name, id);
+  return r == null ? '$id (finns inte)' : r.str(target.titleField);
+}
+
+/// Samlingar med ett kopplingsfält till [c]: deras poster är "under" en post i [c].
+List<(Collection, Field)> childLinks(Workspace ws, Collection c) => [
+  for (final x in ws.collections)
+    for (final f in x.fields)
+      if (f.type == 'link' && f.link == c.name) (x, f),
+];
+
 class _Row extends StatelessWidget {
   const _Row({required this.title, this.sub, this.dim = false, required this.onTap});
 
@@ -153,6 +167,13 @@ class RecordScreen extends StatefulWidget {
 class _RecordScreenState extends State<RecordScreen> {
   late Rec _rec = widget.rec;
   int _versions = 0;
+  Workspace? _ws;
+
+  /// Titlar för kopplingsfälten, per fältnamn.
+  final _linked = <String, String>{};
+
+  /// Poster i andra samlingar som kopplar till den här, per samling och fält.
+  List<(Collection, Field, List<Rec>)> _children = [];
 
   Collection get c => widget.collection;
 
@@ -160,6 +181,60 @@ class _RecordScreenState extends State<RecordScreen> {
   void initState() {
     super.initState();
     historyCount(_rec).then((n) => mounted ? setState(() => _versions = n) : null);
+    _loadLinks();
+  }
+
+  Future<void> _loadLinks() async {
+    final ws = _ws ?? await Workspace.load();
+    final linked = <String, String>{};
+    for (final f in c.fields.where((f) => f.type == 'link')) {
+      final id = _rec.str(f.name);
+      if (id.isNotEmpty) linked[f.name] = await linkTitle(ws.collection(f.link!), id);
+    }
+    final children = <(Collection, Field, List<Rec>)>[];
+    for (final (x, f) in childLinks(ws, c)) {
+      final recs = (await listRecords(x.name)).where((r) => r.str(f.name) == _rec.id).toList()
+        ..sort((a, b) => a.str(x.titleField).toLowerCase().compareTo(b.str(x.titleField).toLowerCase()));
+      children.add((x, f, recs));
+    }
+    if (!mounted) return;
+    setState(() {
+      _ws = ws;
+      _linked
+        ..clear()
+        ..addAll(linked);
+      _children = children;
+    });
+  }
+
+  Future<void> _openLinked(Field f) async {
+    final target = _ws?.collection(f.link!);
+    final r = target == null ? null : await readRecord(target.name, _rec.str(f.name));
+    if (r == null || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RecordScreen(collection: target!, rec: r),
+      ),
+    );
+    await _loadLinks();
+  }
+
+  Future<void> _openChild(Collection x, Rec r) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RecordScreen(collection: x, rec: r),
+      ),
+    );
+    await _loadLinks();
+  }
+
+  Future<void> _addChild(Collection x, Field f) async {
+    await Navigator.of(context).push<Rec>(
+      MaterialPageRoute(
+        builder: (_) => FormScreen(collection: x, back: _rec.str(c.titleField), initial: {f.name: _rec.id}),
+      ),
+    );
+    await _loadLinks();
   }
 
   Future<void> _edit() async {
@@ -171,6 +246,7 @@ class _RecordScreenState extends State<RecordScreen> {
     );
     if (saved == null || !mounted) return;
     setState(() => _rec = saved);
+    await _loadLinks();
     _versions = await historyCount(saved);
     if (!mounted) return;
     setState(() {});
@@ -195,6 +271,16 @@ class _RecordScreenState extends State<RecordScreen> {
     }
     _versions = await historyCount(now);
     if (mounted) setState(() => _rec = now);
+  }
+
+  String _childSub(Collection x, Field link, Rec r) {
+    final d = x.dateField == null ? null : DateTime.tryParse(r.str(x.dateField!.name));
+    return [
+      if (d != null) dayLabel(d),
+      for (final f in x.fields)
+        if (f != link && f.name != x.titleField && f != x.dateField && f.type == 'text' && r.str(f.name).isNotEmpty)
+          r.str(f.name),
+    ].take(2).join('  ');
   }
 
   Future<void> _delete() async {
@@ -230,14 +316,42 @@ class _RecordScreenState extends State<RecordScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(f.label, style: const TextStyle(color: muted, fontSize: 15)),
-                    Text(
-                      f.type == 'date' && DateTime.tryParse(_rec.str(f.name)) != null
-                          ? dayLabel(DateTime.parse(_rec.str(f.name)))
-                          : _rec.str(f.name),
-                    ),
+                    if (f.type == 'link')
+                      InkWell(
+                        onTap: () => _openLinked(f),
+                        child: Text('${_linked[f.name] ?? _rec.str(f.name)} ›', style: const TextStyle(color: accent)),
+                      )
+                    else
+                      Text(
+                        f.type == 'date' && DateTime.tryParse(_rec.str(f.name)) != null
+                            ? dayLabel(DateTime.parse(_rec.str(f.name)))
+                            : f.type == 'bool'
+                            ? (_rec.values[f.name] == true ? 'ja' : 'nej')
+                            : _rec.str(f.name),
+                      ),
                   ],
                 ),
               ),
+          // Poster som hör till den här, till exempel underområden till ett ansvarsområde.
+          for (final (x, f, recs) in _children) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                _children.where((y) => y.$1 == x).length > 1 ? '${x.label} (${f.label.toLowerCase()})' : x.label,
+                style: const TextStyle(color: muted, fontSize: 15),
+              ),
+            ),
+            for (final r in recs)
+              _Row(title: r.str(x.titleField), sub: _childSub(x, f, r), onTap: () => _openChild(x, r)),
+            InkWell(
+              onTap: () => _addChild(x, f),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                child: Text('+ lägg till', style: TextStyle(color: accent, fontSize: 16)),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           if (_versions > 0)
             Text(
               '$_versions tidigare ${_versions == 1 ? 'version' : 'versioner'}',
@@ -306,10 +420,11 @@ class _FormScreenState extends State<FormScreen> {
       }
     }
     for (final f in c.fields) {
-      if (f.type == 'text' || f.type == 'longtext' || f.type == 'number' || f.type == 'link') {
+      if (f.type == 'text' || f.type == 'longtext' || f.type == 'number') {
         _text[f.name] = TextEditingController(text: _v[f.name]?.toString() ?? '');
       }
     }
+    _loadLinkTitles();
   }
 
   @override
@@ -318,6 +433,65 @@ class _FormScreenState extends State<FormScreen> {
       t.dispose();
     }
     super.dispose();
+  }
+
+  /// Titlar för valda kopplingar, per fältnamn.
+  final _linkTitles = <String, String>{};
+  Workspace? _ws;
+
+  Future<Workspace> _workspace() async => _ws ??= await Workspace.load();
+
+  Future<void> _loadLinkTitles() async {
+    final ws = await _workspace();
+    for (final f in c.fields.where((f) => f.type == 'link')) {
+      final id = _v[f.name]?.toString() ?? '';
+      if (id.isNotEmpty) _linkTitles[f.name] = await linkTitle(ws.collection(f.link!), id);
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickLink(Field f) async {
+    final target = (await _workspace()).collection(f.link!);
+    final recs = target == null ? <Rec>[] : await listRecords(target.name);
+    if (target != null) {
+      recs.sort((a, b) => a.str(target.titleField).toLowerCase().compareTo(b.str(target.titleField).toLowerCase()));
+    }
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<Rec?>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1B18),
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(24),
+            children: [
+              Text(f.label, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              if (target == null)
+                Text('Samlingen ${f.link} finns inte.', style: const TextStyle(color: red))
+              else if (recs.isEmpty)
+                Text('${target.label} har inga poster än.', style: const TextStyle(color: muted)),
+              for (final r in recs) _Row(title: r.str(target!.titleField), onTap: () => Navigator.pop(ctx, r)),
+              if (!f.required && (_v[f.name]?.toString() ?? '').isNotEmpty)
+                _Row(title: 'ingen', dim: true, onTap: () => Navigator.pop(ctx, Rec('', '', {}))),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (picked.id.isEmpty) {
+        _v.remove(f.name);
+        _linkTitles.remove(f.name);
+      } else {
+        _v[f.name] = picked.id;
+        _linkTitles[f.name] = picked.str(target!.titleField);
+      }
+    });
   }
 
   Future<void> _pickDate(Field f) async {
@@ -412,6 +586,7 @@ class _FormScreenState extends State<FormScreen> {
                 return d == null ? v : dayLabel(d);
               }),
               'time' => _picker(f, 'välj tid', () => _pickTime(f), (v) => v),
+              'link' => _picker(f, 'välj…', () => _pickLink(f), (v) => _linkTitles[f.name] ?? v),
               'bool' => CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(f.label),

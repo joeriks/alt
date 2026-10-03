@@ -23,6 +23,8 @@ ThemeData altTheme() => ThemeData(
     contentTextStyle: TextStyle(fontFamily: 'monospace', fontSize: 16, color: fg),
     actionTextColor: accent,
     behavior: SnackBarBehavior.floating,
+    // Rutan svävar ovanför knapparna längst ner (som + Ny och prompten), så att de går att trycka på direkt.
+    insetPadding: EdgeInsets.fromLTRB(16, 0, 16, 96),
   ),
   inputDecorationTheme: const InputDecorationTheme(
     enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: line)),

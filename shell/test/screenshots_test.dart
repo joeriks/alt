@@ -134,8 +134,14 @@ void main() {
     await shot(tester, 'ny_tom');
     await tester.tap(find.text('Spara'));
     await shot(tester, 'ny_fel');
-    await tester.binding.handlePopRoute();
+    await tester.enterText(find.byType(TextField).first, 'Klippa gräset');
+    await tester.tap(find.text('Spara'));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
     await tester.pump(const Duration(milliseconds: 500));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 200)));
+    await shot(tester, 'ny_sparad');
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pump(const Duration(seconds: 1));
     await tester.binding.handlePopRoute();
     await tester.pump(const Duration(milliseconds: 500));
 

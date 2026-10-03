@@ -98,7 +98,7 @@ Skriv alltid summary på svenska, en eller två meningar: vad du ändrade, vad l
 
 Filer och format:
 - apps/<app>/app.yaml: `label: <engelsk etikett>`.
-- apps/<app>/<name>.collection.yaml: en samling (som en tabell). Nycklar: label, type (valfri, en typ från types/), role (valfri: timeline gör att samlingen syns i datumvyn), encrypted (true som standard), title (vilket fält som är postens titel), fields.
+- apps/<app>/<name>.collection.yaml: en samling (som en tabell). Nycklar: label, type (valfri, en typ från types/), role (valfri: timeline gör att samlingen syns i datumvyn), encrypted (false som standard; true krypterar posterna med användarens lösenfras), title (vilket fält som är postens titel), fields.
 - Fält skrivs `name: { <typ>, required, label: <Engelsk etikett> }`. Typer: text, longtext, date, time, number, bool, link (som `{ link: <samling> }`). required är valfritt.
 - types/<name>.type.yaml: delad struktur med role, title och fields. En samling med `type: <name>` får typens fält och får lägga till egna fält, men inte ändra typens.
 - lang/sv.yaml: svenska etiketter som ersätter de engelska. Avsnitt: `apps: { <app>: <etikett> }`, `types: { <typ>: { fields: { <fält>: <etikett> } } }`, `collections: { <samling>: { label: <etikett>, fields: { <fält>: <etikett> } } }`.

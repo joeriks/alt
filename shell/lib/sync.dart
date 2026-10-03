@@ -14,7 +14,7 @@ import 'workspace.dart';
 
 /// Synk av poster mellan telefonen och datarepot (alt-my-data).
 ///
-/// En fil per post. Samlingar med `encrypted: true` (standard) krypteras med en nyckel
+/// En fil per post. Samlingar med `encrypted: true` (valfritt, av som standard eftersom repot är privat) krypteras med en nyckel
 /// som räknas fram ur användarens lösenfras; filnamnet blir då en HMAC av postens id så att
 /// inte heller titeln syns. `.alt/crypto.json` i repot håller salt och en kontrollsträng,
 /// så att samma lösenfras ger samma nyckel på en annan telefon och en felskriven fras märks.

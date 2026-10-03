@@ -32,9 +32,9 @@ fields:
     expect(c.fields.last.link, 'person');
   });
 
-  test('encrypted är sant om det inte anges', () {
+  test('encrypted är falskt om det inte anges (repot är privat)', () {
     final c = Collection.parse('x', 'a', 'A', 'fields:\n  namn: { text }\n');
-    expect(c.encrypted, true);
+    expect(c.encrypted, false);
     expect(c.titleField, 'namn');
   });
 

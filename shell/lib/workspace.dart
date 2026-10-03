@@ -151,7 +151,7 @@ class Collection {
       label: tr(['collections', name, 'label']) ?? m['label']?.toString() ?? name,
       fields: fields,
       role: pick('role'),
-      encrypted: m['encrypted'] != false,
+      encrypted: m['encrypted'] == true,
       titleField: pick('title') ?? fields.firstWhere((f) => f.type == 'text', orElse: () => fields.first).name,
       type: typeName,
     );

@@ -119,6 +119,15 @@ Filer och format:
   - Exempel: `label: Open tasks`, `from: { type: dated_entry }`, `where: { done: false, date: { to: today+14d } }`, `sort: date`.
   - lang/sv.yaml: `queries: { <namn>: { label: <etikett> } }`.
 
+- apps/<app>/<name>.report.md: en rapport i Markdown. Appen skriver den till datarepot som _reports/<name>.md vid varje synk och visar den som ett menyval. Först ett YAML-huvud mellan två rader med `---`, med samma nycklar som en sparad fråga (label, from, where, sort, limit) och valfritt group (ett fält, date:week eller date:month). Sedan Markdown med platshållare:
+  - `{{fält}}` visar värdet (datum som "fre 3 okt", bool som ja/nej, en koppling som postens titel). `{{@title}}`, `{{@link}}` (länk till postfilen) och `{{@collection}}`.
+  - `{{#each}}…{{/each}}` upprepas för varje post; med group får varje grupp en ## rubrik automatiskt.
+  - `{{#children <samling>}}…{{/children}}` upprepas för underposter som kopplar till posten.
+  - `{{#if fält}}…{{/if}}` och `{{#unless fält}}…{{/unless}}`. Utanför each: `{{today}}`, `{{count}}`, `{{label}}`.
+  - Ett block-tagg ensamt på en rad tar bort raden, så skriv dem på egna rader.
+  - lang/sv.yaml: `reports: { <namn>: { label: <etikett> } }`.
+  - Du ser aldrig posterna; rapporten räknas fram på telefonen.
+
 Regler:
 - Tekniska namn (appar, samlingar, typer, fält, recept) skrivs på engelska med gemener a-z, siffror och understreck, och börjar med en bokstav. Till exempel private_calendar och dated_entry.
 - Etiketter (label) skrivs på engelska. Lägg ALLTID till svenska etiketter för allt nytt i lang/sv.yaml, och behåll det som redan finns där.

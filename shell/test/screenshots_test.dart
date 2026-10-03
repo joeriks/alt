@@ -113,6 +113,11 @@ void main() {
     rec('responsibilities', 'huset', 'header: "Huset"\ndescription: "Underhåll och försäkring"\n');
     rec('under_areas', 'tak', 'title: "Taket"\ndescription: "Rensa hängrännor varje höst"\nparent: "huset"\n');
     rec('under_areas', 'värme', 'title: "Värmepumpen"\ndescription: "Byt filter i mars"\nparent: "huset"\n');
+    File('${root.path}/workspace/apps/memory_bank/areas.report.md').writeAsStringSync(
+      '---\nlabel: Responsibilities\nfrom: responsibilities\nsort: header\n---\n# Ansvarsområden\n\n{{#each}}\n'
+      '## [{{header}}]({{@link}})\n\n{{#if description}}\n{{description}}\n\n{{/if}}\n'
+      '{{#children under_areas}}\n- [{{title}}]({{@link}}){{#if description}}: {{description}}{{/if}}\n{{/children}}\n{{/each}}\n',
+    );
     PathProviderPlatform.instance = _FakePaths(root.path);
     FlutterSecureStorage.setMockInitialValues({'setup_seen': '1'});
   });
@@ -446,5 +451,22 @@ void main() {
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
     await tester.pump(const Duration(milliseconds: 300));
     await shot(tester, 'underpost_ny');
+
+    await tester.binding.handlePopRoute();
+    await tester.pump(const Duration(milliseconds: 500));
+    final ws2 = (await tester.runAsync(Workspace.load))!;
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('shot'),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: altTheme(),
+          home: ReportScreen(report: ws2.reports.single, collections: ws2.collections),
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(milliseconds: 300));
+    await shot(tester, 'rapport');
   }, skip: !run);
 }

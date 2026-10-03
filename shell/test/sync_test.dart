@@ -83,7 +83,12 @@ void main() {
     final tooth = await saveRecord(c['private_calendar']!, {'title': 'Tandläkare', 'date': '2026-10-06'});
     var r = await syncData(remote: repo);
     expect(r.locked, ['private_calendar']);
-    expect(repo.files.keys, ['notes/${note.id}.yaml']);
+    expect(repo.files.keys.where((p) => p.endsWith('.yaml')), ['notes/${note.id}.yaml']);
+    // Översikterna skrivs i samma commit; den krypterade kalendern får ingen.
+    expect(repo.files['notes/README.md'], contains('[Handla](${note.id}.yaml)'));
+    expect(repo.files['README.md'], contains('Private calendar (krypterad)'));
+    expect(repo.files.keys, isNot(contains('private_calendar/README.md')));
+    expect(repo.commits, 1);
 
     await setPassphrase('korrekt häst batteri', remote: repo);
     r = await syncData(remote: repo);
@@ -114,7 +119,8 @@ void main() {
     // A tar bort anteckningen, B får den borttagen.
     await deleteRecord(note);
     await syncData(remote: repo);
-    expect(repo.files.keys.where((p) => p.startsWith('notes/')), isEmpty);
+    expect(repo.files.keys.where((p) => p.startsWith('notes/') && p.endsWith('.yaml')), isEmpty);
+    expect(repo.files['notes/README.md'], contains('Inga poster än'));
     use(b);
     await syncData(remote: repo);
     expect(await readRecord('notes', note.id), isNull);

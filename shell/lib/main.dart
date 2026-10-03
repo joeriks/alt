@@ -369,6 +369,12 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         () => _push(QueryScreen(query: q, collections: _ws.collections)),
         file: 'apps/${q.app}/${q.name}.query.yaml',
       ),
+    for (final r in _ws.reports)
+      _Cmd(
+        '${r.appLabel} / Rapporter / ${r.label}',
+        () => _push(ReportScreen(report: r, collections: _ws.collections)),
+        file: r.path,
+      ),
     for (final r in _recipes)
       for (final t in r.triggers)
         if (t['menu'] != null)

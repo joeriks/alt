@@ -7,6 +7,7 @@ import 'package:yaml/yaml.dart';
 
 import 'engine.dart';
 import 'query.dart';
+import 'report.dart';
 
 /// Arbetsytan: appar, samlingar och recept som hämtas från receptrepot på GitHub.
 /// Den lokala kopian ligger i `workspace/` och byts bara ut när en hämtning lyckats helt.
@@ -159,7 +160,14 @@ class Collection {
 }
 
 class Workspace {
-  Workspace(this.collections, this.recipes, this.problems, {this.queries = const [], this.recipePaths = const {}});
+  Workspace(
+    this.collections,
+    this.recipes,
+    this.problems, {
+    this.queries = const [],
+    this.recipePaths = const {},
+    this.reports = const [],
+  });
 
   final List<Collection> collections;
   final List<Recipe> recipes;
@@ -167,6 +175,7 @@ class Workspace {
   /// Receptets namn → filens sökväg i receptrepot, för att kunna öppna filen från menyn.
   final Map<String, String> recipePaths;
   final List<Query> queries;
+  final List<Report> reports;
 
   /// Filer som inte gick att läsa, så att ett trasigt recept inte stoppar resten.
   final List<String> problems;
@@ -193,6 +202,7 @@ class Workspace {
     final recipes = <Recipe>[];
     final recipePaths = <String, String>{};
     final queries = <Query>[];
+    final reports = <Report>[];
     final problems = <String>[];
     var lang = const <String, dynamic>{};
     try {
@@ -238,6 +248,9 @@ class Workspace {
         } else if (file.endsWith('.query.yaml')) {
           final name = file.substring(0, file.length - '.query.yaml'.length);
           queries.add(Query.parse(name, app, appLabels[app]!, files[p]!, lang: lang));
+        } else if (file.endsWith('.report.md')) {
+          final name = file.substring(0, file.length - '.report.md'.length);
+          reports.add(Report.parse(name, app, appLabels[app]!, files[p]!, lang: lang));
         }
       } catch (e) {
         problems.add('$app/$file: $e');
@@ -259,7 +272,14 @@ class Workspace {
       ];
       if (missing.isNotEmpty) problems.add('${q.app}/${q.name}.query.yaml: samlingen ${missing.join(', ')} finns inte');
     }
-    return Workspace(collections, recipes, problems, queries: queries, recipePaths: recipePaths);
+    for (final r in reports) {
+      final missing = [
+        for (final f in r.query.from)
+          if (!collections.any((c) => c.name == f)) f,
+      ];
+      if (missing.isNotEmpty) problems.add('${r.app}/${r.name}.report.md: samlingen ${missing.join(', ')} finns inte');
+    }
+    return Workspace(collections, recipes, problems, queries: queries, recipePaths: recipePaths, reports: reports);
   }
 }
 

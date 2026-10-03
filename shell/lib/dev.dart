@@ -480,6 +480,18 @@ Future<void> tryDraft(BuildContext context, String path, String text) async {
         return;
       }
     }
+    if (path.endsWith('.report.md') && hit.isEmpty) {
+      final name = path.split('/').last.replaceAll('.report.md', '');
+      final r = ws.reports.where((r) => r.name == name).firstOrNull;
+      if (r != null && context.mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ReportScreen(report: r, collections: ws.collections),
+          ),
+        );
+        return;
+      }
+    }
     if (path.endsWith('.collection.yaml') && hit.isEmpty) {
       final name = path.split('/').last.replaceAll('.collection.yaml', '');
       final c = ws.collection(name);

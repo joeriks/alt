@@ -1,8 +1,10 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'ai_screen.dart';
 import 'query.dart';
 import 'records.dart';
+import 'report.dart';
 import 'ui.dart';
 import 'workspace.dart';
 
@@ -777,6 +779,149 @@ class _QueryScreenState extends State<QueryScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// En rapport (`*.report.md`) räknad på telefonens poster. Länkar till poster går att trycka på.
+class ReportScreen extends StatefulWidget {
+  const ReportScreen({super.key, required this.report, required this.collections});
+  final Report report;
+  final List<Collection> collections;
+
+  @override
+  State<ReportScreen> createState() => _ReportScreenState();
+}
+
+class _ReportScreenState extends State<ReportScreen> {
+  String? _md;
+  final _taps = <TapGestureRecognizer>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    for (final t in _taps) {
+      t.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    String md;
+    try {
+      // På telefonen finns alla poster i klartext, så även krypterade samlingar kan vara med.
+      md = await renderReport(widget.report, await ReportData.load(widget.collections));
+    } catch (e) {
+      md = 'Rapporten gick inte att skriva: $e';
+    }
+    if (mounted) setState(() => _md = md);
+  }
+
+  Future<void> _open(String coll, String id) async {
+    final c = widget.collections.where((c) => c.name == coll).firstOrNull;
+    final r = c == null ? null : await readRecord(coll, id);
+    if (r == null || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RecordScreen(collection: c!, rec: r),
+      ),
+    );
+    await _load();
+  }
+
+  /// Text med Markdown-länkar, där länkar till poster blir tryckbara.
+  List<InlineSpan> _inline(String text, TextStyle style) {
+    final s = text.replaceAll('**', '');
+    final out = <InlineSpan>[];
+    var at = 0;
+    for (final m in RegExp(r'\[([^\]]+)\]\(([^)]+)\)').allMatches(s)) {
+      if (m.start > at) out.add(TextSpan(text: s.substring(at, m.start), style: style));
+      at = m.end;
+      final target = RegExp(r'([a-zåäö][a-zåäö0-9_]*)/([^/]+)\.yaml$').firstMatch(Uri.decodeFull(m[2]!));
+      if (target == null) {
+        out.add(TextSpan(text: m[1], style: style));
+        continue;
+      }
+      final tap = TapGestureRecognizer()..onTap = () => _open(target[1]!, target[2]!);
+      _taps.add(tap);
+      out.add(
+        TextSpan(
+          text: m[1],
+          style: style.copyWith(color: accent),
+          recognizer: tap,
+        ),
+      );
+    }
+    if (at < s.length) out.add(TextSpan(text: s.substring(at), style: style));
+    return out;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    for (final t in _taps) {
+      t.dispose();
+    }
+    _taps.clear();
+    final lines = (_md ?? '').split('\n').where((l) => l != generatedMark).toList();
+    // Rapportens egen första rubrik blir sidans titel.
+    var title = widget.report.label;
+    if (lines.isNotEmpty && lines.first.startsWith('# ')) title = lines.removeAt(0).substring(2);
+    return AltPage(
+      back: 'Meny',
+      title: title,
+      child: _md == null
+          ? const SizedBox()
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                children: [
+                  for (final l in lines)
+                    if (l.trim().isEmpty)
+                      const SizedBox(height: 10)
+                    else if (RegExp(r'^#{1,6} ').hasMatch(l))
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8, bottom: 2),
+                        child: Text.rich(
+                          TextSpan(
+                            children: _inline(
+                              l.replaceFirst(RegExp(r'^#+ '), ''),
+                              TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: l.startsWith('## ') ? 20 : 18,
+                                color: fg,
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    else if (RegExp(r'^\|[-|: ]+\|$').hasMatch(l.trim()))
+                      const SizedBox()
+                    else
+                      Text.rich(
+                        TextSpan(
+                          children: _inline(
+                            l.startsWith('- ')
+                                ? '• ${l.substring(2)}'
+                                : l.startsWith('|')
+                                ? l
+                                      .trim()
+                                      .replaceAll(RegExp(r'^\||\|$'), '')
+                                      .split(' | ')
+                                      .map((x) => x.trim())
+                                      .join('  ')
+                                : l,
+                            const TextStyle(fontSize: 16, color: fg, height: 1.45),
+                          ),
+                        ),
+                      ),
+                ],
+              ),
+            ),
     );
   }
 }

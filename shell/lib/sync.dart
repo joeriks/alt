@@ -10,6 +10,7 @@ import 'package:yaml/yaml.dart';
 
 import 'github.dart' show gitBlobSha;
 import 'records.dart';
+import 'report.dart';
 import 'workspace.dart';
 
 /// Synk av poster mellan telefonen och datarepot (alt-my-data).
@@ -450,12 +451,17 @@ Future<SyncResult> _syncOnce(DataRemote r, Map<String, bool> resolved) async {
     }
   }
 
+  final sent = upload.length;
+  final reports = await _reports(ws, local, writes, remoteFiles, r);
+  upload.addAll(reports);
+
   if (upload.isNotEmpty) {
-    final n = upload.values.where((v) => v != null).length, d = upload.length - n;
+    final n = upload.entries.where((e) => e.value != null && !reports.containsKey(e.key)).length;
+    final d = sent - n;
     await r.commit(
       snap?.head,
       upload,
-      [if (n > 0) '$n ${n == 1 ? 'post' : 'poster'}', if (d > 0) '$d borttagna'].join(', '),
+      [if (n > 0) '$n ${n == 1 ? 'post' : 'poster'}', if (d > 0) '$d borttagna', if (sent == 0) 'Rapporter'].join(', '),
     );
     // Blob-sha för det vi skickade räknas ut lokalt, så nästa synk ser att GitHub har samma version.
     for (final e in newState.entries.toList()) {
@@ -476,5 +482,48 @@ Future<SyncResult> _syncOnce(DataRemote r, Map<String, bool> resolved) async {
     received++;
   }
   await _saveState(newState);
-  return SyncResult(sent: upload.length, received: received, clashes: clashes, locked: locked.toList()..sort());
+  return SyncResult(sent: sent, received: received, clashes: clashes, locked: locked.toList()..sort());
+}
+
+/// Markdown-filerna som ska ändras i datarepot: översikter och rapporter, räknade på posterna som de
+/// ser ut efter synken. Gamla rapporter som inte längre finns tas bort.
+Future<Map<String, String?>> _reports(
+  Workspace ws,
+  Map<String, Map<String, dynamic>> local,
+  Map<String, Map<String, dynamic>?> writes,
+  Map<String, String> remoteFiles,
+  DataRemote r,
+) async {
+  final after = {...local};
+  for (final e in writes.entries) {
+    if (e.value == null) {
+      after.remove(e.key);
+    } else {
+      after[e.key] = e.value!;
+    }
+  }
+  final records = <String, List<Rec>>{};
+  for (final e in after.entries) {
+    final coll = e.key.split('/').first;
+    records.putIfAbsent(coll, () => []).add(Rec(coll, e.key.substring(coll.length + 1), e.value));
+  }
+  final now = DateTime.now();
+  final files = await buildReports(ws, ReportData(ws.collections, records, DateTime(now.year, now.month, now.day)));
+  final out = <String, String?>{};
+  for (final e in files.entries) {
+    final remote = remoteFiles[e.key];
+    if (remote == gitBlobSha(utf8.encode(e.value))) continue;
+    // En egen README i roten skrivs inte över, bara GitHubs standardfil eller en som alt skrivit.
+    if (e.key == 'README.md' && remote != null) {
+      final text = await r.read(remote);
+      if (!text.contains(generatedMark) && text.trim().split('\n').length > 3) continue;
+    }
+    out[e.key] = e.value;
+  }
+  for (final p in remoteFiles.keys) {
+    final stale =
+        (p.startsWith('$reportsDir/') && p.endsWith('.md')) || RegExp(r'^[^/._][^/]*/README\.md$').hasMatch(p);
+    if (stale && !files.containsKey(p)) out[p] = null;
+  }
+  return out;
 }

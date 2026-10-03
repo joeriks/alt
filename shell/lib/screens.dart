@@ -54,7 +54,13 @@ class _Row extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(title, style: TextStyle(color: dim ? muted : fg)),
-              if (sub != null && sub!.isNotEmpty) Text(sub!, style: const TextStyle(color: muted, fontSize: 15)),
+              if (sub != null && sub!.isNotEmpty)
+                Text(
+                  sub!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: muted, fontSize: 15),
+                ),
             ],
           ),
         ),
@@ -74,6 +80,9 @@ class CollectionScreen extends StatefulWidget {
 class _CollectionScreenState extends State<CollectionScreen> {
   List<Rec> _recs = [];
 
+  /// Titlar på posterna som kopplingsfälten pekar på, per fält och id.
+  final _parents = <String, Map<String, String>>{};
+
   Collection get c => widget.collection;
 
   @override
@@ -89,7 +98,24 @@ class _CollectionScreenState extends State<CollectionScreen> {
     } else {
       recs.sort((a, b) => a.str(c.titleField).compareTo(b.str(c.titleField)));
     }
-    if (mounted) setState(() => _recs = recs);
+    final parents = <String, Map<String, String>>{};
+    final links = c.fields.where((f) => f.type == 'link').toList();
+    if (links.isNotEmpty) {
+      final ws = await Workspace.load();
+      for (final f in links) {
+        final target = ws.collection(f.link!);
+        if (target == null) continue;
+        parents[f.name] = {for (final r in await listRecords(target.name)) r.id: r.str(target.titleField)};
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _recs = recs;
+        _parents
+          ..clear()
+          ..addAll(parents);
+      });
+    }
   }
 
   String _sub(Rec r) {
@@ -97,6 +123,8 @@ class _CollectionScreenState extends State<CollectionScreen> {
     return [
       if (d != null) dayLabel(d),
       if (c.timeField != null) r.str(c.timeField!.name),
+      for (final e in _parents.entries)
+        if (r.str(e.key).isNotEmpty) e.value[r.str(e.key)] ?? r.str(e.key),
     ].where((s) => s.isNotEmpty).join('  ');
   }
 
@@ -158,9 +186,12 @@ class _CollectionScreenState extends State<CollectionScreen> {
 }
 
 class RecordScreen extends StatefulWidget {
-  const RecordScreen({super.key, required this.collection, required this.rec});
+  const RecordScreen({super.key, required this.collection, required this.rec, this.back});
   final Collection collection;
   final Rec rec;
+
+  /// Vart tillbaka-pilen leder; samlingens namn om inget anges.
+  final String? back;
 
   @override
   State<RecordScreen> createState() => _RecordScreenState();
@@ -176,6 +207,10 @@ class _RecordScreenState extends State<RecordScreen> {
 
   /// Poster i andra samlingar som kopplar till den här, per samling och fält.
   List<(Collection, Field, List<Rec>)> _children = [];
+
+  /// Underlistor som visas i sin helhet, per samling och fält.
+  final _expanded = <String>{};
+  static const _shown = 5;
 
   Collection get c => widget.collection;
 
@@ -196,7 +231,11 @@ class _RecordScreenState extends State<RecordScreen> {
     final children = <(Collection, Field, List<Rec>)>[];
     for (final (x, f) in childLinks(ws, c)) {
       final recs = (await listRecords(x.name)).where((r) => r.str(f.name) == _rec.id).toList()
-        ..sort((a, b) => a.str(x.titleField).toLowerCase().compareTo(b.str(x.titleField).toLowerCase()));
+        ..sort(
+          (a, b) => x.dateField != null
+              ? _byDate(b, a, x)
+              : a.str(x.titleField).toLowerCase().compareTo(b.str(x.titleField).toLowerCase()),
+        );
       children.add((x, f, recs));
     }
     if (!mounted) return;
@@ -215,7 +254,7 @@ class _RecordScreenState extends State<RecordScreen> {
     if (r == null || !mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => RecordScreen(collection: target!, rec: r),
+        builder: (_) => RecordScreen(collection: target!, rec: r, back: _rec.str(c.titleField)),
       ),
     );
     await _loadLinks();
@@ -224,19 +263,24 @@ class _RecordScreenState extends State<RecordScreen> {
   Future<void> _openChild(Collection x, Rec r) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => RecordScreen(collection: x, rec: r),
+        builder: (_) => RecordScreen(collection: x, rec: r, back: _rec.str(c.titleField)),
       ),
     );
     await _loadLinks();
   }
 
   Future<void> _addChild(Collection x, Field f) async {
-    await Navigator.of(context).push<Rec>(
+    final saved = await Navigator.of(context).push<Rec>(
       MaterialPageRoute(
         builder: (_) => FormScreen(collection: x, back: _rec.str(c.titleField), initial: {f.name: _rec.id}),
       ),
     );
     await _loadLinks();
+    if (saved == null || !mounted) return;
+    showUndo(context, 'Sparad: ${saved.str(x.titleField)}', () async {
+      await deleteRecord(saved);
+      await _loadLinks();
+    });
   }
 
   Future<void> _edit() async {
@@ -275,18 +319,43 @@ class _RecordScreenState extends State<RecordScreen> {
     if (mounted) setState(() => _rec = now);
   }
 
+  /// Raden under titeln i en underlista: datum, tid, ja-fält och början av första texten.
   String _childSub(Collection x, Field link, Rec r) {
-    final d = x.dateField == null ? null : DateTime.tryParse(r.str(x.dateField!.name));
+    final d = _date(r, x);
+    final text = x.fields
+        .where((f) => f != link && f.name != x.titleField && (f.type == 'text' || f.type == 'longtext'))
+        .map((f) => r.str(f.name).replaceAll(RegExp(r'\s+'), ' ').trim())
+        .firstWhere((t) => t.isNotEmpty, orElse: () => '');
     return [
       if (d != null) dayLabel(d),
+      if (x.timeField != null) r.str(x.timeField!.name),
       for (final f in x.fields)
-        if (f != link && f.name != x.titleField && f != x.dateField && f.type == 'text' && r.str(f.name).isNotEmpty)
-          r.str(f.name),
-    ].take(2).join('  ');
+        if (f.type == 'bool' && r.values[f.name] == true) f.label.toLowerCase(),
+      text,
+    ].where((s) => s.isNotEmpty).join(' · ');
   }
 
   Future<void> _delete() async {
     final r = _rec;
+    final under = _children.fold(0, (n, y) => n + y.$3.length);
+    if (under > 0) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: bg,
+          title: Text('Ta bort ${r.str(c.titleField)}?'),
+          content: Text(
+            '$under ${under == 1 ? 'post' : 'poster'} hör till den här posten. '
+            'De ligger kvar, men utan koppling.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('avbryt')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ta bort')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
     final messenger = ScaffoldMessenger.of(context);
     await deleteRecord(r);
     if (!mounted) return;
@@ -303,11 +372,81 @@ class _RecordScreenState extends State<RecordScreen> {
       );
   }
 
+  Widget _childSection(Collection x, Field f, List<Rec> recs) {
+    final key = '${x.name}.${f.name}';
+    final all = _expanded.contains(key) || recs.length <= _shown + 1;
+    final label = _children.where((y) => y.$1 == x).length > 1 ? '${x.label} (${f.label.toLowerCase()})' : x.label;
+    return Container(
+      margin: const EdgeInsets.only(top: 10, bottom: 8),
+      padding: const EdgeInsets.only(top: 10),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: line)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  recs.isEmpty ? label : '$label · ${recs.length}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              InkWell(
+                onTap: () => _addChild(x, f),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                  child: Text('+ lägg till', style: TextStyle(color: accent, fontSize: 16)),
+                ),
+              ),
+            ],
+          ),
+          if (recs.isEmpty) const Text('inga än', style: TextStyle(color: muted, fontSize: 15)),
+          for (final r in all ? recs : recs.take(_shown))
+            _Row(title: r.str(x.titleField), sub: _childSub(x, f, r), onTap: () => _openChild(x, r)),
+          if (!all)
+            InkWell(
+              onTap: () => setState(() => _expanded.add(key)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Text('visa alla ${recs.length} ›', style: const TextStyle(color: accent, fontSize: 16)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AltPage(
-      back: c.label,
+      back: widget.back ?? c.label,
       title: _rec.str(c.titleField),
+      bottom: Container(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: line)),
+        ),
+        padding: const EdgeInsets.only(top: 4),
+        child: Row(
+          children: [
+            TextButton(
+              onPressed: _edit,
+              child: const Text('redigera', style: TextStyle(color: accent)),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: _askAi,
+              child: const Text('fråga AI', style: TextStyle(color: accent)),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: _delete,
+              child: const Text('ta bort', style: TextStyle(color: muted)),
+            ),
+          ],
+        ),
+      ),
       child: ListView(
         children: [
           for (final f in c.fields)
@@ -335,49 +474,15 @@ class _RecordScreenState extends State<RecordScreen> {
                 ),
               ),
           // Poster som hör till den här, till exempel underområden till ett ansvarsområde.
-          for (final (x, f, recs) in _children) ...[
+          for (final (x, f, recs) in _children) _childSection(x, f, recs),
+          if (_versions > 0)
             Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.only(top: 8, bottom: 16),
               child: Text(
-                _children.where((y) => y.$1 == x).length > 1 ? '${x.label} (${f.label.toLowerCase()})' : x.label,
+                '$_versions tidigare ${_versions == 1 ? 'version' : 'versioner'}',
                 style: const TextStyle(color: muted, fontSize: 15),
               ),
             ),
-            for (final r in recs)
-              _Row(title: r.str(x.titleField), sub: _childSub(x, f, r), onTap: () => _openChild(x, r)),
-            InkWell(
-              onTap: () => _addChild(x, f),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 10),
-                child: Text('+ lägg till', style: TextStyle(color: accent, fontSize: 16)),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          if (_versions > 0)
-            Text(
-              '$_versions tidigare ${_versions == 1 ? 'version' : 'versioner'}',
-              style: const TextStyle(color: muted, fontSize: 15),
-            ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              TextButton(
-                onPressed: _edit,
-                child: const Text('redigera', style: TextStyle(color: accent)),
-              ),
-              const SizedBox(width: 16),
-              TextButton(
-                onPressed: _askAi,
-                child: const Text('fråga AI', style: TextStyle(color: accent)),
-              ),
-              const SizedBox(width: 16),
-              TextButton(
-                onPressed: _delete,
-                child: const Text('ta bort', style: TextStyle(color: muted)),
-              ),
-            ],
-          ),
         ],
       ),
     );

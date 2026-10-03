@@ -113,6 +113,27 @@ void main() {
     rec('responsibilities', 'huset', 'header: "Huset"\ndescription: "Underhåll och försäkring"\n');
     rec('under_areas', 'tak', 'title: "Taket"\ndescription: "Rensa hängrännor varje höst"\nparent: "huset"\n');
     rec('under_areas', 'värme', 'title: "Värmepumpen"\ndescription: "Byt filter i mars"\nparent: "huset"\n');
+    File('${root.path}/workspace/apps/memory_bank/chores.collection.yaml').writeAsStringSync(
+      'label: Chores\ntitle: title\nfields:\n  title: { text, required, label: Title }\n  date: { date, label: Date }\n'
+      '  done: { bool, label: Done }\n  note: { longtext, label: Note }\n  area: { link: responsibilities, label: Area }\n',
+    );
+    const chores = [
+      'Sotning',
+      'Byta filter',
+      'Rensa hängrännor',
+      'Kolla brandvarnare',
+      'Olja dörrar',
+      'Tvätta fönster',
+      'Klippa häck',
+    ];
+    for (var i = 0; i < chores.length; i++) {
+      rec(
+        'chores',
+        'syssla$i',
+        'title: "${chores[i]}"\ndate: "${_iso(t.subtract(Duration(days: 9 * i)))}"\ndone: ${i > 0}\n'
+            'note: "Ring Anders först, han vet var stegen står och har nyckeln till förrådet"\narea: "huset"\n',
+      );
+    }
     File('${root.path}/workspace/apps/memory_bank/areas.report.md').writeAsStringSync(
       '---\nlabel: Responsibilities\nfrom: responsibilities\nsort: header\n---\n# Ansvarsområden\n\n{{#each}}\n'
       '## [{{header}}]({{@link}})\n\n{{#if description}}\n{{description}}\n\n{{/if}}\n'
@@ -445,7 +466,25 @@ void main() {
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
     await tester.pump(const Duration(milliseconds: 300));
     await shot(tester, 'underposter');
-    await tester.tap(find.text('+ lägg till'));
+    await tester.tap(find.text('visa alla 7 ›'));
+    await tester.pump();
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pump();
+    await shot(tester, 'underposter_alla');
+    await tester.tap(find.text('ta bort'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await shot(tester, 'ta_bort_fraga');
+    await tester.tap(find.text('avbryt'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Taket'));
+    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
+    await tester.pump(const Duration(milliseconds: 500));
+    await shot(tester, 'underpost');
+    await tester.binding.handlePopRoute();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.ensureVisible(find.text('+ lägg till').last);
+    await tester.pump();
+    await tester.tap(find.text('+ lägg till').last);
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
     await tester.pump(const Duration(milliseconds: 500));
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));

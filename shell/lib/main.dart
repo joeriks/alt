@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter/material.dart';
 
@@ -6,7 +8,10 @@ import 'ai_screen.dart';
 import 'dev.dart';
 import 'engine.dart';
 import 'host.dart';
+import 'records.dart';
 import 'screens.dart';
+import 'sync.dart';
+import 'sync_screen.dart';
 import 'ui.dart';
 import 'workspace.dart';
 
@@ -95,11 +100,106 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _q.addListener(() => setState(() {}));
     _focus.addListener(() => setState(() {}));
-    _reload();
+    // En ändrad post skickas till datarepot några sekunder senare, så att flera ändringar blir en commit.
+    onRecordsChanged = () {
+      _syncTimer?.cancel();
+      _syncTimer = Timer(const Duration(seconds: 5), () => _sync());
+    };
+    _reload().then((_) => _sync());
+  }
+
+  Timer? _syncTimer;
+
+  /// Synkar posterna med datarepot. I bakgrunden sägs bara det som behöver göras något åt.
+  Future<void> _sync({bool quiet = true}) async {
+    if (((await githubToken()) ?? '').isEmpty) {
+      if (!quiet) _say('lägg in en GitHub-nyckel under System / GitHub-nyckel först');
+      return;
+    }
+    if (!quiet) _say('synkar…');
+    try {
+      final r = await syncData();
+      if (!mounted) return;
+      if (r.clashes.isNotEmpty) {
+        _say(r.summary);
+        final done = await Navigator.of(context).push<SyncResult>(
+          MaterialPageRoute(
+            builder: (_) => ClashScreen(clashes: r.clashes, collections: _ws.collections),
+          ),
+        );
+        if (done != null) _say(done.summary);
+      } else if (!quiet || r.received > 0 || r.locked.isNotEmpty) {
+        _say(r.summary);
+      }
+    } catch (e) {
+      if (mounted) _say('synken misslyckades: $e');
+    }
+  }
+
+  Future<void> _askPassphrase() async {
+    final a = TextEditingController(), b = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1B18),
+        title: const Text('Lösenfras', style: TextStyle(fontSize: 20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Krypterade samlingar låses med den här frasen innan de skickas till GitHub. '
+              'Använd samma fras på en ny telefon. Glömmer du den går posterna på GitHub inte att läsa.',
+              style: TextStyle(color: muted, fontSize: 15),
+            ),
+            TextField(
+              controller: a,
+              obscureText: true,
+              autofocus: true,
+              cursorColor: accent,
+              decoration: const InputDecoration(hintText: 'lösenfras'),
+            ),
+            TextField(
+              controller: b,
+              obscureText: true,
+              cursorColor: accent,
+              decoration: const InputDecoration(hintText: 'samma igen'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Avbryt')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Spara')),
+        ],
+      ),
+    );
+    final phrase = a.text;
+    final same = a.text == b.text;
+    a.dispose();
+    b.dispose();
+    if (ok != true || phrase.isEmpty) return;
+    if (!same) {
+      _say('fraserna var inte lika, försök igen');
+      return;
+    }
+    if (phrase.length < 12) {
+      _say('lösenfrasen behöver minst 12 tecken, gärna några ord');
+      return;
+    }
+    _say('räknar fram nyckeln…');
+    try {
+      await setPassphrase(phrase);
+      _say('lösenfrasen sparad');
+      await _sync(quiet: false);
+    } catch (e) {
+      _say('$e');
+    }
   }
 
   @override
   void dispose() {
+    _syncTimer?.cancel();
+    onRecordsChanged = null;
     WidgetsBinding.instance.removeObserver(this);
     _q.dispose();
     _focus.dispose();
@@ -129,7 +229,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   Future<void> _askToken() => _askSecret(
     'GitHub-nyckel',
-    'Läs- och skrivrätt (Contents) till ${defaultRepo.split('/').last}. Sparas krypterad på telefonen.',
+    'Läs- och skrivrätt (Contents) till ${defaultRepo.split('/').last} och ${defaultDataRepo.split('/').last}. '
+        'Sparas krypterad på telefonen.',
     setGithubToken,
     'nyckeln sparad, kör System / Hämta recept',
   );
@@ -277,6 +378,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       }
     }),
     _Cmd('System / GitHub-nyckel', _askToken),
+    _Cmd('System / Data / Synka nu', () => _sync(quiet: false)),
+    _Cmd('System / Data / Lösenfras', _askPassphrase),
     _Cmd('System / AI / Claude-nyckel', _askClaudeKey),
     _Cmd('System / AI / OpenAI-nyckel', _askOpenAiKey),
     _Cmd('System / AI / Välj modell', _chooseModel),

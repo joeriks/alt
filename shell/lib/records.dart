@@ -8,7 +8,10 @@ import 'workspace.dart';
 
 /// Poster lagras som en fil per post: `data/<samling>/<id>.yaml`.
 /// Varje ändring sparar den förra versionen under `data/.history/`, och en
-/// borttagen post flyttas till `data/.trash/`. Synk mot alt-my-data kommer senare.
+/// borttagen post flyttas till `data/.trash/`. Synken mot alt-my-data finns i sync.dart.
+
+/// Anropas när en post sparats, ändrats eller tagits bort, så att synken kan köra.
+void Function()? onRecordsChanged;
 
 Future<Directory> dataDir() async => Directory('${(await getApplicationSupportDirectory()).path}/data');
 
@@ -92,22 +95,27 @@ Future<Rec> saveRecord(Collection c, Map<String, dynamic> values, {String? id}) 
       if (e.value != null && e.value != '') e.key: e.value,
   };
   File('${dir.path}/$recId.yaml').writeAsStringSync(_toYaml(clean), flush: true);
+  onRecordsChanged?.call();
   return Rec(c.name, recId!, clean);
 }
 
 /// Återställer en post till ett tidigare innehåll (används av Ångra).
-Future<void> restoreRecord(Rec previous) async {
+/// Med [keepHistory] sparas den nuvarande versionen först (används när synken tar emot en ändring).
+Future<void> restoreRecord(Rec previous, {bool keepHistory = false, bool notify = true}) async {
+  if (keepHistory) await _keepHistory(previous.collection, previous.id);
   final f = await _file(previous.collection, previous.id);
   f.parent.createSync(recursive: true);
   f.writeAsStringSync(_toYaml(previous.values), flush: true);
+  if (notify) onRecordsChanged?.call();
 }
 
-Future<void> deleteRecord(Rec r) async {
+Future<void> deleteRecord(Rec r, {bool notify = true}) async {
   final f = await _file(r.collection, r.id);
   if (!f.existsSync()) return;
   final t = File('${(await dataDir()).path}/.trash/${r.collection}/${r.id}.${_ts()}.yaml');
   t.parent.createSync(recursive: true);
   f.renameSync(t.path);
+  if (notify) onRecordsChanged?.call();
 }
 
 /// Antal sparade äldre versioner av en post.

@@ -9,6 +9,9 @@ import 'package:alt/ai_screen.dart';
 import 'package:alt/dev.dart';
 import 'package:alt/main.dart';
 import 'package:alt/records.dart';
+import 'package:alt/sync.dart';
+import 'package:alt/sync_screen.dart';
+import 'package:alt/workspace.dart';
 import 'package:alt/ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -342,5 +345,32 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
     await shot(tester, 'fraga_prova');
+    await tester.binding.handlePopRoute();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: const Key('shot'),
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: altTheme(),
+          home: ClashScreen(
+            collections: (await tester.runAsync(Workspace.load))!.collections,
+            clashes: [
+              SyncClash(
+                'private_calendar',
+                'tandläkare',
+                {'title': 'Tandläkare', 'date': '2026-10-07', 'time': '14:30'},
+                {'title': 'Tandläkare', 'date': '2026-10-08', 'time': '09:00'},
+                'x',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Den här telefonen'));
+    await shot(tester, 'krock');
   }, skip: !run);
 }
